@@ -102,12 +102,14 @@
               <div class="flex gap-8">
                 <a href="{{ route('employees.show',$emp) }}" class="btn btn-sm btn-secondary" title="View"><i class="bi bi-eye"></i></a>
                 <a href="{{ route('employees.edit',$emp) }}" class="btn btn-sm btn-primary" title="Edit"><i class="bi bi-pencil"></i></a>
+                <a href="{{ route('employees.transfers.index',$emp) }}" class="btn btn-sm btn-warning" title="Branch Transfer"><i class="bi bi-arrow-left-right"></i></a>
                 <form method="POST" action="{{ route('employees.destroy',$emp) }}" onsubmit="return confirm('Remove {{ $emp->name }}?')">
                   @csrf @method('DELETE')
                   <button class="btn btn-sm btn-danger" title="Remove"><i class="bi bi-trash"></i></button>
                 </form>
               </div>
             </td>
+
           </tr>
         @empty
           <tr><td colspan="9">

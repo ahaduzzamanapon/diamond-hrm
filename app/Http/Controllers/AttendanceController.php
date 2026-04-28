@@ -371,18 +371,29 @@ class AttendanceController extends Controller
 
         $cur = $start->copy();
         while ($cur->lte($end)) {
-            $dateStr   = $cur->format('Y-m-d');
-            $isWeekend = $cur->isWeekend();
-            $holiday   = $holidays->get($dateStr);
-            $baseStatus= match(true) {
-                !is_null($holiday) => 'holiday',
-                $isWeekend         => 'weekend',
-                default            => 'absent',
-            };
+            $dateStr = $cur->format('Y-m-d');
+            $dayName = strtolower($cur->format('l')); // 'monday', 'friday', etc.
+            $holiday = $holidays->get($dateStr);
 
             foreach ($employees as $emp) {
                 $key = $emp->id . '_' . $dateStr;
-                
+
+                // Get shift for this date — respects transfer history, no N+1 due to eager load
+                $shiftForDate = $emp->getShiftForDate($dateStr);
+
+                // Is this a working day per the employee's shift config?
+                // Shift has boolean columns: sunday, monday, tuesday...saturday
+                // If no shift assigned, fall back to Carbon isWeekend (Sat/Sun)
+                $isWorkingDay = $shiftForDate
+                    ? (bool)($shiftForDate->$dayName)
+                    : !$cur->isWeekend();
+
+                $baseStatus = match(true) {
+                    !is_null($holiday) => 'holiday',
+                    !$isWorkingDay     => 'weekend',
+                    default            => 'absent',
+                };
+
                 if ($existing->has($key)) {
                     $att = $existing->get($key)->first();
 
@@ -393,10 +404,9 @@ class AttendanceController extends Controller
                     }
 
                     if ($att->in_time || $att->out_time) {
-                        // Has punch data — use shift for that specific date (respects transfers)
+                        // Has biometric punch — calculate present/late using that day's shift
                         $status = 'present';
                         $late   = 0;
-                        $shiftForDate = $emp->getShiftForDate($dateStr);
                         if ($att->in_time && $shiftForDate) {
                             $shiftStart = Carbon::parse($dateStr . ' ' . $shiftForDate->start_time);
                             $inTime     = Carbon::parse($dateStr . ' ' . $att->in_time);
@@ -408,7 +418,7 @@ class AttendanceController extends Controller
                         $att->update(['status' => $status, 'late_minutes' => $late, 'entered_by' => $user->id]);
                         $updated++;
                     } else {
-                        // No punch — force to holiday/weekend/absent
+                        // No punch — set holiday / weekend / absent per shift config
                         $att->update([
                             'status'     => $baseStatus,
                             'note'       => $baseStatus === 'holiday' ? $holiday : $att->note,

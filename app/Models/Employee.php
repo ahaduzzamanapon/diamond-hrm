@@ -65,13 +65,16 @@ class Employee extends Model
      */
     public function getShiftForDate(string $date): ?Shift
     {
-        $transfers = $this->transfers()->with('fromShift','toShift')->orderBy('effective_date')->get();
+        // Use already-loaded relationship to avoid N+1 in loops
+        $transfers = $this->relationLoaded('transfers')
+            ? $this->transfers
+            : $this->transfers()->with('fromShift', 'toShift')->orderBy('effective_date')->get();
 
         if ($transfers->isEmpty()) {
             return $this->shift;
         }
 
-        $d = Carbon::parse($date);
+        $d     = Carbon::parse($date);
         $first = $transfers->first();
 
         // Before the first ever transfer — return that transfer's from_shift
@@ -79,7 +82,6 @@ class Employee extends Model
             return $first->fromShift;
         }
 
-        // Find the last transfer whose effective_date is on or before $date
         $applicable = $transfers->filter(
             fn($t) => Carbon::parse($t->effective_date)->lte($d)
         )->last();
@@ -92,13 +94,16 @@ class Employee extends Model
      */
     public function getBranchForDate(string $date): ?Branch
     {
-        $transfers = $this->transfers()->with('fromBranch','toBranch')->orderBy('effective_date')->get();
+        // Use already-loaded relationship to avoid N+1 in loops
+        $transfers = $this->relationLoaded('transfers')
+            ? $this->transfers
+            : $this->transfers()->with('fromBranch', 'toBranch')->orderBy('effective_date')->get();
 
         if ($transfers->isEmpty()) {
             return $this->branch;
         }
 
-        $d = Carbon::parse($date);
+        $d     = Carbon::parse($date);
         $first = $transfers->first();
 
         if ($d->lt(Carbon::parse($first->effective_date))) {
