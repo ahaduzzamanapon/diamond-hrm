@@ -42,11 +42,16 @@
           $day     = \Carbon\Carbon::createFromDate($year,$mon,$d);
           $key     = $day->format('Y-m-d');
           $att     = $empAtt->get($key);
-          $isWknd  = $day->isWeekend();
           $holiday = $holidays->get($key);
+
+          // Shift for this specific date — respects transfer history
+          $shiftForDay = $emp->getShiftForDate($key);
+          $dayName     = strtolower($day->format('l')); // 'monday','friday' etc.
+          $isWknd      = $shiftForDay ? !(bool)($shiftForDay->$dayName) : $day->isWeekend();
+
           $status  = $att?->status ?? ($holiday?'Holiday':($isWknd?'Weekend':''));
-          $offIn   = $emp->shift ? \Carbon\Carbon::parse($emp->shift->start_time)->format('h:i:s A') : '';
-          $offOut  = $emp->shift ? \Carbon\Carbon::parse($emp->shift->end_time)->format('h:i:s A') : '';
+          $offIn   = $shiftForDay ? \Carbon\Carbon::parse($shiftForDay->start_time)->format('h:i:s A') : '';
+          $offOut  = $shiftForDay ? \Carbon\Carbon::parse($shiftForDay->end_time)->format('h:i:s A') : '';
           $actIn   = $att?->in_time  ? \Carbon\Carbon::parse($att->in_time)->format('h:i:s A') : '';
           $actOut  = $att?->out_time ? \Carbon\Carbon::parse($att->out_time)->format('h:i:s A') : '';
 

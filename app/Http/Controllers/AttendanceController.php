@@ -28,12 +28,12 @@ class AttendanceController extends Controller
 
         $query = Attendance::with(['employee.branch','employee.department','employee.designation','enteredBy'])
             ->whereDate('date', $date)
+            ->when($request->status, fn($q) => $q->where('status', $request->status))
             ->whereHas('employee', function($q) use ($user, $request) {
                 if (!$user->hasPermissionTo('view_all_branches')) $q->where('branch_id', $user->branch_id);
                 if ($request->branch_id)     $q->where('branch_id',     $request->branch_id);
                 if ($request->department_id) $q->where('department_id', $request->department_id);
                 if ($request->designation_id)$q->where('designation_id',$request->designation_id);
-                if ($request->status)        $q->where('status',        $request->status);
             });
 
         $attendances  = $query->orderBy('created_at','desc')->paginate(30)->withQueryString();
@@ -265,7 +265,7 @@ class AttendanceController extends Controller
             ->when($request->branch_id, fn($q) => $q->where('branch_id', $request->branch_id))
             ->when($request->dept_id,   fn($q) => $q->where('department_id', $request->dept_id))
             ->when($empIds,             fn($q) => $q->whereIn('id', $empIds))
-            ->with('branch','department','designation','shift');
+            ->with(['branch','department','designation','shift','transfers.fromShift','transfers.toShift']);
         $employees = $empQuery->get();
 
         if ($employees->isEmpty()) {
@@ -447,7 +447,7 @@ class AttendanceController extends Controller
         // Bulk insert in chunks
         if (!empty($toInsert)) {
             foreach (array_chunk($toInsert, 200) as $chunk) {
-                Attendance::insert($chunk);
+                Attendance::insertOrIgnore($chunk);
             }
         }
 

@@ -56,7 +56,10 @@
           <td><span class="badge {{ $device->is_active ? 'badge-success' : 'badge-danger' }}">{{ $device->is_active ? 'Online' : 'Offline' }}</span></td>
           <td>
             <div class="flex gap-8">
-              <a href="{{ route('biometric.sync') }}?device={{ $device->id }}" class="btn btn-sm btn-secondary"><i class="bi bi-arrow-repeat"></i></a>
+              <a href="{{ route('biometric.sync') }}?device={{ $device->id }}" class="btn btn-sm btn-secondary" title="Sync"><i class="bi bi-arrow-repeat"></i></a>
+              <button class="btn btn-sm btn-primary" title="Edit Branch"
+                onclick="openEditDevice({{ $device->id }},'{{ addslashes($device->name) }}',{{ $device->branch_id ?? 0 }},'{{ $device->ip_address }}')"
+              ><i class="bi bi-pencil"></i></button>
               <form method="POST" action="{{ route('biometric.devices.destroy', $device) }}" onsubmit="return confirm('Remove device?')">@csrf @method('DELETE')
                 <button class="btn btn-sm btn-danger"><i class="bi bi-trash"></i></button>
               </form>
@@ -96,4 +99,51 @@
     </form>
   </div>
 </div>
+
+{{-- Edit Device Modal --}}
+<div class="modal-overlay" id="editDeviceModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title"><i class="bi bi-fingerprint"></i> Edit Device</span>
+      <button class="modal-close" onclick="document.getElementById('editDeviceModal').classList.remove('open')">&times;</button>
+    </div>
+    <form method="POST" id="editDeviceForm">@csrf @method('PUT')
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Device Name</label>
+          <input name="name" id="editDeviceName" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Branch <span style="color:red">*</span></label>
+          <select name="branch_id" id="editDeviceBranch" class="form-control" required>
+            <option value="">— Select Branch —</option>
+            @foreach($branches as $b)
+              <option value="{{ $b->id }}">{{ $b->name }}</option>
+            @endforeach
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">IP Address</label>
+          <input name="ip_address" id="editDeviceIp" class="form-control" placeholder="192.168.1.100">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('editDeviceModal').classList.remove('open')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
 @endsection
+@push('scripts')
+<script>
+function openEditDevice(id, name, branchId, ip) {
+  document.getElementById('editDeviceForm').action = '/biometric/devices/' + id;
+  document.getElementById('editDeviceName').value  = name;
+  document.getElementById('editDeviceIp').value    = ip || '';
+  const sel = document.getElementById('editDeviceBranch');
+  for (let opt of sel.options) { opt.selected = (parseInt(opt.value) === parseInt(branchId)); }
+  document.getElementById('editDeviceModal').classList.add('open');
+}
+</script>
+@endpush

@@ -100,7 +100,12 @@ class BiometricController extends Controller
         $deviceId = $request->device;
         $limit    = (int)($request->limit ?? 500);
 
-        $query = BiometricLog::with('employee.shift')
+        // Load transfers with shifts so getShiftForDate() has no N+1
+        $logs = BiometricLog::with([
+                'employee.shift',
+                'employee.transfers.fromShift',
+                'employee.transfers.toShift',
+            ])
             ->where('processed', false)
             ->whereNotNull('employee_id')
             ->when($deviceId, function($q) use ($deviceId) {
@@ -108,10 +113,8 @@ class BiometricController extends Controller
                 if ($device) $q->where('device_serial', $device->serial_number);
             })
             ->orderBy('punch_time')
-            ->limit($limit);
-        
-
-        $logs = $query->get();
+            ->limit($limit)
+            ->get();
 
         if ($logs->isEmpty()) {
             return back()->with('info', 'No unprocessed logs found.');
@@ -125,62 +128,100 @@ class BiometricController extends Controller
             $employee = $log->employee;
             if (!$employee) { $skipped++; continue; }
 
-            $date     = Carbon::parse($log->punch_time)->format('Y-m-d');
-            $shift    = $employee->shift;
+            $date         = Carbon::parse($log->punch_time)->format('Y-m-d');
+            $punchTime    = Carbon::parse($log->punch_time)->format('H:i:s');
+            $dayName      = strtolower(Carbon::parse($date)->format('l')); // 'monday','friday' etc.
+
+            // Get shift for this date — respects transfer history, no N+1
+            $shiftForDate = $employee->getShiftForDate($date);
+
             $existing = Attendance::where('employee_id', $employee->id)
                 ->where('date', $date)->first();
 
             if (!$existing) {
-                // First punch: clock-in
+                // ── First punch of the day: clock-in ──────────────────────────
                 $late   = 0;
                 $status = 'present';
-                if ($shift) {
-                    $shiftStart = Carbon::parse($date . ' ' . $shift->start_time);
+
+                if ($shiftForDate) {
+                    $shiftStart = Carbon::parse($date . ' ' . $shiftForDate->start_time);
                     $late = max(0, Carbon::parse($log->punch_time)->diffInMinutes($shiftStart, false) * -1);
-                    if ($late > ($shift->grace_minutes ?? 0)) $status = 'late';
+                    if ($late > ($shiftForDate->grace_minutes ?? 0)) $status = 'late';
                 }
 
-                $holiday   = Holiday::where('date', $date)->first();
-                $isWeekend = Carbon::parse($date)->isWeekend();
-                $finalSt   = ($holiday || $isWeekend)
-                    ? ($holiday ? 'holiday' : 'weekend')
-                    : $status;
+                // Shift-based weekend check (respects friday=weekend for BD companies)
+                $isWorkingDay = $shiftForDate
+                    ? (bool)($shiftForDate->$dayName)
+                    : !Carbon::parse($date)->isWeekend();
+
+                $holiday = Holiday::where('date', $date)->first();
+                $finalSt = match(true) {
+                    !is_null($holiday) => 'holiday',
+                    !$isWorkingDay     => 'weekend',
+                    default            => $status,
+                };
 
                 $att = Attendance::create([
                     'employee_id'  => $employee->id,
                     'date'         => $date,
-                    'in_time'      => Carbon::parse($log->punch_time)->format('H:i:s'),
+                    'in_time'      => $punchTime,
                     'status'       => $finalSt,
                     'late_minutes' => $late,
                     'source'       => 'biometric',
                 ]);
 
-                if ($holiday || $isWeekend) {
+                // Auto-create extra present request for holiday/weekend punches
+                if ($holiday || !$isWorkingDay) {
                     \App\Models\ExtraPresentRequest::firstOrCreate(
                         ['employee_id' => $employee->id, 'date' => $date],
                         [
                             'attendance_id' => $att->id,
                             'day_type'      => $holiday ? 'holiday' : 'weekend',
                             'holiday_name'  => $holiday?->name,
-                            'extra_pay'     => $employee->daily_rate,
+                            'extra_pay'     => $employee->daily_rate ?? 0,
                         ]
                     );
                 }
                 $created++;
+
             } else {
-                // Subsequent punch: clock-out
-                $workMin  = $existing->in_time
-                    ? Carbon::parse($log->punch_time)->diffInMinutes(Carbon::parse($date . ' ' . $existing->in_time))
-                    : null;
-                $overtime = ($shift && $workMin)
-                    ? max(0, $workMin - ($shift->working_minutes ?? 480))
-                    : 0;
-                $existing->update([
-                    'out_time'         => Carbon::parse($log->punch_time)->format('H:i:s'),
-                    'working_minutes'  => $workMin,
-                    'overtime_minutes' => $overtime,
-                ]);
-                $updated++;
+                // ── Existing record found ──────────────────────────────────────
+                if (!$existing->in_time) {
+                    // ⚠️ Record exists but NO in_time yet
+                    // This happens when processAttendance ran before sync
+                    // Treat this punch as clock-in
+                    $late   = 0;
+                    $status = 'present';
+
+                    if ($shiftForDate) {
+                        $shiftStart = Carbon::parse($date . ' ' . $shiftForDate->start_time);
+                        $late = max(0, Carbon::parse($log->punch_time)->diffInMinutes($shiftStart, false) * -1);
+                        if ($late > ($shiftForDate->grace_minutes ?? 0)) $status = 'late';
+                    }
+
+                    $existing->update([
+                        'in_time'      => $punchTime,
+                        'status'       => $status,
+                        'late_minutes' => $late,
+                        'source'       => 'biometric',
+                    ]);
+                    $updated++;
+                } else {
+                    // Has in_time → this is clock-out
+                    $workMin  = Carbon::parse($log->punch_time)->diffInMinutes(
+                        Carbon::parse($date . ' ' . $existing->in_time)
+                    );
+                    $overtime = ($shiftForDate && $workMin)
+                        ? max(0, $workMin - ($shiftForDate->working_minutes ?? 480))
+                        : 0;
+
+                    $existing->update([
+                        'out_time'         => $punchTime,
+                        'working_minutes'  => $workMin,
+                        'overtime_minutes' => $overtime,
+                    ]);
+                    $updated++;
+                }
             }
 
             $log->update(['processed' => true]);
@@ -193,6 +234,7 @@ class BiometricController extends Controller
 
         return back()->with('success', $msg);
     }
+
 
 
     public function pushEmployees(Request $request, BiometricDevice $device)
