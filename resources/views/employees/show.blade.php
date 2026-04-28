@@ -12,9 +12,13 @@
     </div>
   </div>
   <div class="flex gap-8">
+    <a href="{{ route('employees.transfers.index', $employee) }}" class="btn btn-warning">
+      <i class="bi bi-arrow-left-right"></i> Transfer
+    </a>
     <a href="{{ route('employees.edit', $employee) }}" class="btn btn-primary"><i class="bi bi-pencil"></i> Edit</a>
     <a href="{{ route('employees.index') }}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Back</a>
   </div>
+
 </div>
 
 {{-- Status Banner --}}

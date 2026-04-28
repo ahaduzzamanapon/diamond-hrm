@@ -341,7 +341,7 @@ class AttendanceController extends Controller
             ->when($request->branch_id, fn($q) => $q->where('branch_id', $request->branch_id))
             ->when($request->dept_id,   fn($q) => $q->where('department_id', $request->dept_id))
             ->when($empIds,             fn($q) => $q->whereIn('id', $empIds))
-            ->with('shift')
+            ->with(['shift', 'transfers.fromShift', 'transfers.toShift'])
             ->get();
 
         if ($employees->isEmpty()) {
@@ -393,14 +393,15 @@ class AttendanceController extends Controller
                     }
 
                     if ($att->in_time || $att->out_time) {
-                        // Has punch data — calculate present/late
+                        // Has punch data — use shift for that specific date (respects transfers)
                         $status = 'present';
                         $late   = 0;
-                        if ($att->in_time && $emp->shift) {
-                            $shiftStart = Carbon::parse($dateStr . ' ' . $emp->shift->start_time);
+                        $shiftForDate = $emp->getShiftForDate($dateStr);
+                        if ($att->in_time && $shiftForDate) {
+                            $shiftStart = Carbon::parse($dateStr . ' ' . $shiftForDate->start_time);
                             $inTime     = Carbon::parse($dateStr . ' ' . $att->in_time);
                             $late       = max(0, $inTime->diffInMinutes($shiftStart, false) * -1);
-                            if ($late > ($emp->shift->grace_minutes ?? 0)) {
+                            if ($late > ($shiftForDate->grace_minutes ?? 0)) {
                                 $status = 'late';
                             }
                         }

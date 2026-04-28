@@ -56,7 +56,11 @@ Route::middleware(['auth'])->group(function () {
         // AJAX
         Route::get('/ajax/departments',   [EmployeeController::class, 'getDepartments'])->name('ajax.departments');
         Route::get('/ajax/designations',  [EmployeeController::class, 'getDesignations'])->name('ajax.designations');
+        // Branch Transfer
+        Route::get('/{employee}/transfers',  [\App\Http\Controllers\EmployeeTransferController::class, 'index'])->name('transfers.index');
+        Route::post('/{employee}/transfers', [\App\Http\Controllers\EmployeeTransferController::class, 'store'])->name('transfers.store');
     });
+
 
     // ── Branches ────────────────────────────────────────────────────────────
     Route::resource('branches', BranchController::class);
