@@ -39,10 +39,15 @@ class EmployeeTransferController extends Controller
             'to_branch_id'     => 'required|exists:branches,id',
             'to_department_id' => 'nullable|exists:departments,id',
             'to_shift_id'      => 'nullable|exists:shifts,id',
+            // BUG-125 FIX: warn but allow past dates (needed for data correction)
+            // Using 'date' only — admin may need to backfill historical transfers
             'effective_date'   => 'required|date',
             'reason'           => 'nullable|string|max:1000',
         ]);
 
+        // Warn if backdating beyond 3 months — show flash warning
+        $effDate = \Carbon\Carbon::parse($request->effective_date);
+        $backdated = $effDate->lt(now()->subMonths(3));
         DB::transaction(function () use ($request, $employee) {
             // Save transfer record (capture current state as "from")
             EmployeeTransfer::create([
@@ -71,8 +76,11 @@ class EmployeeTransferController extends Controller
             }
         });
 
-        return redirect()
-            ->route('employees.transfers.index', $employee)
-            ->with('success', "✅ {$employee->name} transferred successfully!");
+        $msg = "✅ {$employee->name} transferred successfully!";
+        if ($backdated) {
+            $msg .= " ⚠️ Warning: Effective date is more than 3 months ago — historical attendance reports may be affected.";
+        }
+        return redirect()->route('employees.transfers.index', $employee)->with('success', $msg);
     }
+
 }

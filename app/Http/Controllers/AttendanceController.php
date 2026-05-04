@@ -78,7 +78,9 @@ class AttendanceController extends Controller
 
         if ($request->filled('employee_ids')) {
             $empIds   = (array) $request->employee_ids;
-            $employees = Employee::whereIn('id', $empIds)->with('designation','department')->get();
+            $employees = Employee::whereIn('id', $empIds)
+                ->with('designation','department','shift','transfers.fromShift','transfers.toShift')
+                ->get();
 
             foreach ($employees as $emp) {
                 $att = Attendance::where('employee_id',$emp->id)
@@ -106,7 +108,7 @@ class AttendanceController extends Controller
         $month  = $request->month ?? now()->format('Y-m');
         [$year,$mon] = explode('-', $month);
 
-        $empQuery = Employee::with('designation','department')
+        $empQuery = Employee::with(['designation','department','shift','transfers.fromShift','transfers.toShift'])
             ->where('status','active')
             ->when(!$user->hasPermissionTo('view_all_branches'), fn($q) => $q->where('branch_id', $user->branch_id));
         if ($request->branch_id)     $empQuery->where('branch_id',    $request->branch_id);
@@ -171,8 +173,8 @@ class AttendanceController extends Controller
                 'status'      => 'required',
             ]);
 
-            $employee = Employee::findOrFail($request->employee_id);
-            $shift    = $employee->shift;
+            $employee = Employee::with(['shift','transfers.fromShift','transfers.toShift'])->findOrFail($request->employee_id);
+            $shift    = $employee->getShiftForDate($request->date);
             $late     = 0;
 
             if ($shift && $request->in_time) {
@@ -184,20 +186,20 @@ class AttendanceController extends Controller
             $att = Attendance::updateOrCreate(
                 ['employee_id' => $request->employee_id, 'date' => $request->date],
                 [
-                    'in_time'    => $request->in_time,
-                    'out_time'   => $request->out_time,
-                    'status'     => $late > ($shift->grace_minutes ?? 0) ? 'late' : $request->status,
+                    'in_time'     => $request->in_time,
+                    'out_time'    => $request->out_time,
+                    'status'      => $late > ($shift->grace_minutes ?? 0) ? 'late' : $request->status,
                     'late_minutes'=> $late,
-                    'source'     => 'manual',
-                    'note'       => $request->note,
-                    'entered_by' => Auth::id(),
+                    'source'      => 'manual',
+                    'note'        => $request->note,
+                    'entered_by'  => Auth::id(),
                 ]
             );
 
             // Check if working on holiday/weekend — auto-create extra present request
-            $holiday  = Holiday::whereDate('date', $request->date)->first();
-            $dayOfWeek= Carbon::parse($request->date)->dayOfWeek; // 0=Sun, 6=Sat
-            $isWeekend = ($dayOfWeek === 0 || $dayOfWeek === 6);
+            $holiday   = Holiday::whereDate('date', $request->date)->first();
+            $dayName   = strtolower(Carbon::parse($request->date)->format('l'));
+            $isWeekend = $shift ? !(bool)($shift->$dayName) : Carbon::parse($request->date)->isWeekend();
 
             if (($holiday || $isWeekend) && in_array($request->status, ['present','late'])) {
                 ExtraPresentRequest::firstOrCreate(
@@ -275,16 +277,18 @@ class AttendanceController extends Controller
         // Monthly modes
         if (in_array($type, ['monthly_summary','monthly_register','monthly_present','monthly_absent'])) {
             $daysInMonth = Carbon::createFromDate($year, $mon, 1)->daysInMonth;
-            $allAtt = Attendance::whereIn('employee_id', $employees->pluck('id'))
+            $allAtt = Attendance::with(['inBranch','outBranch'])
+                ->whereIn('employee_id', $employees->pluck('id'))
                 ->whereYear('date', $year)->whereMonth('date', $mon)
                 ->get()->groupBy('employee_id');
+
             $holidays = Holiday::whereYear('date',$year)->whereMonth('date',$mon)->pluck('name','date');
             $totalHolidays = $holidays->count();
 
             // For register: load biometric logs grouped by emp_date_punchtype for device name
             $bioLogs = collect();
             if ($type === 'monthly_register') {
-                $bioLogs = \App\Models\BiometricLog::with('device')
+                $bioLogs = \App\Models\BiometricLog::with(['device.branch'])
                     ->whereIn('employee_id', $employees->pluck('id'))
                     ->whereYear('punch_time', $year)
                     ->whereMonth('punch_time', $mon)
@@ -295,6 +299,7 @@ class AttendanceController extends Controller
                         $log->punch_type
                     );
             }
+
 
             $html = view('attendance.partials.'.$type, compact(
                 'employees','allAtt','daysInMonth','holidays','totalHolidays','year','mon','month','bioLogs'

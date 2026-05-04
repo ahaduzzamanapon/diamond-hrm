@@ -102,11 +102,14 @@
     <tbody>
       @foreach($lateRecs as $i => $att)
       @php
-        $offIn  = $emp->shift ? \Carbon\Carbon::parse($emp->shift->start_time)->format('h:i A') : '—';
+        // BUG-103 FIX: Use date-specific shift via getShiftForDate()
+        $shiftOnDate = $emp->getShiftForDate($att->date->format('Y-m-d'));
+        $offIn  = $shiftOnDate ? \Carbon\Carbon::parse($shiftOnDate->start_time)->format('h:i A') : '—';
         $actIn  = $att->in_time ? \Carbon\Carbon::parse($att->in_time)->format('h:i A') : '—';
         $latMin = $att->late_minutes ?? 0;
         $rowBg  = $i%2===0 ? '#fff' : '#fff5f5';
       @endphp
+
       <tr style="background:{{ $rowBg }}">
         <td style="border:1px solid #ddd;padding:4px 7px;text-align:center">{{ $att->date->format('d-M-y') }}</td>
         <td style="border:1px solid #ddd;padding:4px 7px;text-align:center">{{ $att->date->format('D') }}</td>
@@ -167,14 +170,17 @@
     <tbody>
       @foreach($records->sortBy('date') as $i => $att)
       @php
+        // BUG-103 FIX: Use date-specific shift via getShiftForDate()
+        $shiftOnDate = $emp->getShiftForDate($att->date->format('Y-m-d'));
         $latMin   = $att->late_minutes ?? 0;
         $earlyMin = $att->early_out_minutes ?? 0;
-        $offIn    = $emp->shift ? \Carbon\Carbon::parse($emp->shift->start_time)->format('h:i A') : '—';
-        $offOut   = $emp->shift ? \Carbon\Carbon::parse($emp->shift->end_time)->format('h:i A') : '—';
+        $offIn    = $shiftOnDate ? \Carbon\Carbon::parse($shiftOnDate->start_time)->format('h:i A') : '—';
+        $offOut   = $shiftOnDate ? \Carbon\Carbon::parse($shiftOnDate->end_time)->format('h:i A') : '—';
         $actIn    = $att->in_time  ? \Carbon\Carbon::parse($att->in_time)->format('h:i A')  : '—';
         $actOut   = $att->out_time ? \Carbon\Carbon::parse($att->out_time)->format('h:i A') : '—';
         $sc       = $statusColor[$att->status] ?? '#0a0a0a';
         $rowBg    = in_array($att->status,['weekend','holiday']) ? '#f8fafc' : ($i%2===0 ? '#fff' : '#fafafa');
+
       @endphp
       <tr style="background:{{ $rowBg }}">
         <td style="border:1px solid #ddd;padding:4px 7px;text-align:center">{{ $att->date->format('d-M-y') }}</td>

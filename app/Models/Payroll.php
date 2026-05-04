@@ -16,6 +16,7 @@ class Payroll extends Model
         'present_days',
         'absent_days',
         'late_days',
+        'half_days',
         'leave_days',
         'holiday_days',
         'weekend_days',

@@ -17,7 +17,6 @@ use Illuminate\Support\Facades\Log;
  * Device Cloud Server Settings (K40 Pro):
  *   Server Mode: ADMS
  *   Server Address: your-domain.com
- *   (No /adms prefix — device sends to /adms/* automatically)
  */
 class AdmsController extends Controller
 {
@@ -29,7 +28,6 @@ class AdmsController extends Controller
             BiometricDevice::where('serial_number', $sn)
                 ->update(['last_online' => now()]);
         }
-        // Return empty response — device expects 200 OK
         return response('', 200)->header('Content-Type', 'text/plain');
     }
 
@@ -41,22 +39,31 @@ class AdmsController extends Controller
         $sn   = $request->SN ?? 'UNKNOWN';
         $data = $request->getContent();
 
-        // ZKTeco ADMS format: ATTLOG\tUSERID\tTIMESTAMP\tSTATUS\tVERIFY\n
-        $lines = explode("\n", trim($data));
+        // ── BUG-005 FIX: Cache all employees by biometric_user_id to avoid N+1 ──
+        $employeeMap = Employee::whereNotNull('biometric_user_id')
+            ->where('status', 'active')
+            ->with(['shift', 'transfers.fromShift', 'transfers.toShift'])
+            ->get()
+            ->keyBy('biometric_user_id');
+
+        // Pre-load device→branch map (cached, no per-punch query)
+        $deviceBranchMap = \App\Models\BiometricDevice::whereNotNull('branch_id')
+            ->pluck('branch_id', 'serial_number');
+
+        $lines     = explode("\n", trim($data));
         $processed = 0;
 
         foreach ($lines as $line) {
             if (str_starts_with($line, 'ATTLOG')) {
                 $parts = explode("\t", $line);
-                // ATTLOG  UserID  Timestamp  Status  Verify
                 if (count($parts) >= 4) {
                     $userId    = $parts[1] ?? null;
                     $timestamp = $parts[2] ?? null;
                     $status    = (int)($parts[3] ?? 0); // 0=in, 1=out
 
                     if ($userId && $timestamp) {
-                        $punchTime  = Carbon::parse($timestamp);
-                        $punchType  = $status === 1 ? 'out' : 'in';
+                        $punchTime = Carbon::parse($timestamp);
+                        $punchType = $status === 1 ? 'out' : 'in';
 
                         $log = BiometricLog::create([
                             'device_serial'     => $sn,
@@ -67,11 +74,11 @@ class AdmsController extends Controller
                             'processed'         => false,
                         ]);
 
-                        // Map to employee and create/update attendance
-                        $employee = Employee::where('biometric_user_id', $userId)->first();
+                        // ── BUG-005 FIX: use cached map, no extra query ───────
+                        $employee = $employeeMap->get($userId);
                         if ($employee) {
                             $log->update(['employee_id' => $employee->id]);
-                            $this->processAttendanceLog($employee, $log);
+                            $this->processAttendanceLog($employee, $log, $deviceBranchMap);
                         }
                         $processed++;
                     }
@@ -79,54 +86,69 @@ class AdmsController extends Controller
             }
         }
 
-        // Update device heartbeat
-        BiometricDevice::where('serial_number',$sn)->update(['last_online'=>now()]);
-
-        return response("OK: {$processed} records", 200)->header('Content-Type','text/plain');
+        BiometricDevice::where('serial_number', $sn)->update(['last_online' => now()]);
+        return response("OK: {$processed} records", 200)->header('Content-Type', 'text/plain');
     }
 
     // Device command acknowledgment
     public function deviceCommand(Request $request)
     {
         $sn = $request->SN;
-        BiometricDevice::where('serial_number',$sn)->update(['last_online'=>now()]);
+        BiometricDevice::where('serial_number', $sn)->update(['last_online' => now()]);
         return response('', 200);
     }
 
-    private function processAttendanceLog(Employee $employee, BiometricLog $log): void
+    // ── BUG-001 & BUG-015 FIX: Use shift-based weekend detection + getShiftForDate ──
+    private function processAttendanceLog(Employee $employee, BiometricLog $log, $deviceBranchMap = null): void
     {
-        $date     = $log->punch_time->format('Y-m-d');
-        $shift    = $employee->shift;
-        $existing = Attendance::where('employee_id',$employee->id)->whereDate('date',$date)->first();
+        $date      = $log->punch_time->format('Y-m-d');
+        $dayName   = strtolower(Carbon::parse($date)->format('l'));
+        $branchId  = $deviceBranchMap ? $deviceBranchMap->get($log->device_serial) : null;
+
+        // BUG-015 FIX: use getShiftForDate() — respects transfer history
+        $shift     = $employee->getShiftForDate($date);
+
+        $existing  = Attendance::where('employee_id', $employee->id)
+            ->whereDate('date', $date)->first();
 
         if (!$existing) {
             // First punch = clock in
-            $late = 0;
+            $late   = 0;
             $status = 'present';
+
             if ($shift) {
                 $shiftStart = Carbon::parse($date . ' ' . $shift->start_time);
                 $late = max(0, $log->punch_time->diffInMinutes($shiftStart, false) * -1);
-                if ($late > $shift->grace_minutes) $status = 'late';
+                if ($late > ($shift->grace_minutes ?? 0)) $status = 'late';
             }
 
-            // Check holiday/weekend
-            $holiday  = Holiday::whereDate('date',$date)->first();
-            $dayOfWeek= $log->punch_time->dayOfWeek;
-            $isWeekend = ($dayOfWeek === 0 || $dayOfWeek === 6);
+            // BUG-001 FIX: shift-based weekend detection (Friday = weekend for BD companies)
+            $isWorkingDay = $shift
+                ? (bool)($shift->$dayName)
+                : !Carbon::parse($date)->isWeekend();
+
+            $holiday  = Holiday::whereDate('date', $date)->first();
+            $finalSt  = match(true) {
+                !is_null($holiday) => 'holiday',
+                !$isWorkingDay     => 'weekend',
+                default            => $status,
+            };
 
             $att = Attendance::create([
-                'employee_id'  => $employee->id,
-                'date'         => $date,
-                'in_time'      => $log->punch_time->format('H:i:s'),
-                'status'       => ($holiday || $isWeekend) ? ($holiday ? 'holiday' : 'weekend') : $status,
-                'late_minutes' => $late,
-                'source'       => 'biometric',
+                'employee_id'      => $employee->id,
+                'date'             => $date,
+                'in_time'          => $log->punch_time->format('H:i:s'),
+                'in_device_serial' => $log->device_serial,
+                // Fallback to employee's branch if device has no branch assigned
+                'in_branch_id'     => $branchId ?? $employee->branch_id,
+                'status'           => $finalSt,
+                'late_minutes'     => $late,
+                'source'           => 'biometric',
             ]);
 
-            // Auto-create extra present request for holiday/weekend
-            if ($holiday || $isWeekend) {
+            if ($holiday || !$isWorkingDay) {
                 ExtraPresentRequest::firstOrCreate(
-                    ['employee_id'=>$employee->id,'date'=>$date],
+                    ['employee_id' => $employee->id, 'date' => $date],
                     [
                         'attendance_id' => $att->id,
                         'day_type'      => $holiday ? 'holiday' : 'weekend',
@@ -135,25 +157,28 @@ class AdmsController extends Controller
                     ]
                 );
             }
+
         } else {
             // Subsequent punch = clock out
             $workingMinutes = $existing->in_time
-                ? $log->punch_time->diffInMinutes(Carbon::parse($date.' '.$existing->in_time))
+                ? $log->punch_time->diffInMinutes(Carbon::parse($date . ' ' . $existing->in_time))
                 : null;
 
             $overtime = 0;
             if ($shift && $workingMinutes) {
-                $expected = $shift->working_minutes;
-                $overtime = max(0, $workingMinutes - $expected);
+                $overtime = max(0, $workingMinutes - ($shift->working_minutes ?? 480));
             }
 
             $existing->update([
-                'out_time'         => $log->punch_time->format('H:i:s'),
-                'working_minutes'  => $workingMinutes,
-                'overtime_minutes' => $overtime,
+                'out_time'          => $log->punch_time->format('H:i:s'),
+                'out_device_serial' => $log->device_serial,
+                // Fallback to employee's branch if device has no branch assigned
+                'out_branch_id'     => $branchId ?? $employee->branch_id,
+                'working_minutes'   => $workingMinutes,
+                'overtime_minutes'  => $overtime,
             ]);
         }
 
-        $log->update(['processed'=>true]);
+        $log->update(['processed' => true]);
     }
 }

@@ -17,7 +17,7 @@ class LeaveApplication extends Model
     public function employee()  { return $this->belongsTo(Employee::class); }
     public function leaveType() { return $this->belongsTo(LeaveType::class); }
     public function approver()  { return $this->belongsTo(User::class,'approved_by'); }
-
-
+    // BUG-115 FIX: Add missing bmApprover relationship
+    public function bmApprover(){ return $this->belongsTo(User::class,'bm_approved_by'); }
 
 }

@@ -30,8 +30,12 @@ class BranchController extends Controller
     public function edit(Branch $branch)   { return view('branches.edit',['branch'=>$branch]); }
     public function update(Request $r, Branch $branch)
     {
-        $r->validate(['name'=>'required']);
-        $data = $r->except(['_token','_method','logo']);
+        // BUG-114 FIX: validate code uniqueness (ignore current branch)
+        $r->validate([
+            'name' => 'required',
+            'code' => 'nullable|unique:branches,code,' . $branch->id,
+        ]);
+        $data = $r->only(['name','code','address','phone','email','is_active']);
         if ($r->hasFile('logo')) { if($branch->logo) Storage::disk('public')->delete($branch->logo); $data['logo'] = $r->file('logo')->store('branch-logos','public'); }
         $branch->update($data);
         return redirect()->route('branches.index')->with('success','Branch updated!');
@@ -75,34 +79,6 @@ class DesignationController extends Controller
     public function destroy(Designation $designation) { $designation->delete(); return back()->with('success','Deleted.'); }
 }
 
-// ── ShiftController ───────────────────────────────────────────────────────────
-class ShiftController extends Controller
-{
-    public function index()  { return view('shifts.index',['shifts'=>Shift::withCount('employees')->get()]); }
-    public function store(Request $r)
-    {
-        $r->validate(['name'=>'required','start_time'=>'required','end_time'=>'required']);
-        Shift::create(array_merge($r->only('name','start_time','end_time','grace_minutes','break_minutes','is_active'), [
-            'sunday'   =>$r->boolean('sunday'),   'monday'   =>$r->boolean('monday'),
-            'tuesday'  =>$r->boolean('tuesday'),  'wednesday'=>$r->boolean('wednesday'),
-            'thursday' =>$r->boolean('thursday'), 'friday'   =>$r->boolean('friday'),
-            'saturday' =>$r->boolean('saturday'),
-        ]));
-        return back()->with('success','Shift added!');
-    }
-    public function update(Request $r, Shift $shift)
-    {
-        $shift->update(array_merge($r->only('name','start_time','end_time','grace_minutes','break_minutes','is_active'), [
-            'sunday'   =>$r->boolean('sunday'),   'monday'   =>$r->boolean('monday'),
-            'tuesday'  =>$r->boolean('tuesday'),  'wednesday'=>$r->boolean('wednesday'),
-            'thursday' =>$r->boolean('thursday'), 'friday'   =>$r->boolean('friday'),
-            'saturday' =>$r->boolean('saturday'),
-        ]));
-        return back()->with('success','Shift updated!');
-    }
-    public function destroy(Shift $shift) { $shift->delete(); return back()->with('success','Deleted.'); }
-}
-
 // ── HolidayController ─────────────────────────────────────────────────────────
 class HolidayController extends Controller
 {
@@ -113,7 +89,8 @@ class HolidayController extends Controller
     }
     public function store(Request $r)
     {
-        $r->validate(['name'=>'required','date'=>'required|date']);
+        // BUG-117 FIX: prevent duplicate holiday dates
+        $r->validate(['name'=>'required','date'=>'required|date|unique:holidays,date']);
         Holiday::create($r->only('name','date','type','description','branch_id'));
         return back()->with('success','Holiday added!');
     }

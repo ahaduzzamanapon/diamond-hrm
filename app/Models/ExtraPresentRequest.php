@@ -49,14 +49,19 @@ class ExtraPresentRequest extends Model
             'status'         => 'approved',
         ]);
 
-        // Update attendance status
-        $this->attendance->update(['status' => 'extra_present']);
+        // BUG-105 FIX: Use 'present' not 'extra_present' — recognized by all reports
+        if ($this->attendance) {
+            $this->attendance->update(['status' => 'present']);
+        }
 
         return true;
     }
 
     public function reject(User $user, string $level, string $remarks = ''): void
     {
+        // BUG-118 FIX: Validate $level to prevent dynamic key injection
+        if (!in_array($level, ['bm', 'hr'])) return;
+
         $updates = ['status' => 'rejected', "{$level}_remarks" => $remarks];
         $updates["{$level}_status"] = 'rejected';
         $updates["{$level}_approved_by"] = $user->id;

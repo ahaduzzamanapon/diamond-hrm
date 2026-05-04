@@ -66,7 +66,7 @@ class EmployeeController extends Controller
             'department_id'   => 'required|exists:departments,id',
             'designation_id'  => 'required|exists:designations,id',
             'joining_date'    => 'required|date',
-            'email'           => 'nullable|email|unique:users,email',
+            'email'           => 'nullable|email|unique:users,email|unique:employees,email',
             'username'        => 'nullable|string|unique:employees,username',
             'password'        => 'nullable|min:6|confirmed',
             'basic_salary'    => 'nullable|numeric|min:0',
@@ -78,8 +78,9 @@ class EmployeeController extends Controller
         ]);
 
         DB::transaction(function () use ($request) {
-            // Generate Employee ID
-            $lastId = Employee::max('id') ?? 0;
+            // BUG-012 FIX: Use DB lock to prevent race condition in ID generation
+            $lastEmp    = Employee::lockForUpdate()->orderByDesc('id')->first();
+            $lastId     = $lastEmp?->id ?? 0;
             $employeeId = 'EMP-' . str_pad($lastId + 1, 4, '0', STR_PAD_LEFT);
 
             // Handle photo
@@ -196,7 +197,19 @@ class EmployeeController extends Controller
         ]);
 
         DB::transaction(function () use ($request, $employee) {
-            $data = $request->except(['_token','_method','photo','note_file','role','password','password_confirmation']);
+            // BUG-113 FIX: Use explicit allowlist instead of except() to prevent mass assignment
+            $data = $request->only([
+                'first_name','last_name','branch_id','department_id','designation_id','shift_id',
+                'phone','contact_number','username','gender','date_of_birth','joining_date',
+                'leaving_date','probation_months','employee_or_lead','team_leader_id','leave_category',
+                'blood_group','nid','address','permanent_address','punch_id','basic_salary',
+                'house_rent_allowance','medical_allowance','transport_allowance','bank_name',
+                'bank_account','remark','status',
+            ]);
+            // Map form field names to model field names
+            if (isset($data['employee_or_lead'])) { $data['employee_type'] = $data['employee_or_lead']; unset($data['employee_or_lead']); }
+            if (isset($data['leave_category'])) { $data['leave_type_id'] = $data['leave_category']; unset($data['leave_category']); }
+            if (isset($data['punch_id'])) { $data['biometric_user_id'] = $data['punch_id']; unset($data['punch_id']); }
 
             if ($request->hasFile('photo')) {
                 if ($employee->photo) Storage::disk('public')->delete($employee->photo);

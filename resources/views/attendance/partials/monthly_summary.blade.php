@@ -1,5 +1,16 @@
 @php
   $periodLabel = \Carbon\Carbon::createFromDate($year,$mon,1)->format('F Y');
+
+  // BUG-102 FIX: Pre-load leave summaries to avoid N+1 queries in view
+  $empIds = $employees->pluck('id');
+  $approvedLeaves = \App\Models\LeaveApplication::whereIn('employee_id', $empIds)
+      ->where('status','approved')->whereYear('from_date',$year)->whereMonth('from_date',$mon)
+      ->selectRaw('employee_id, SUM(total_days) as total')->groupBy('employee_id')
+      ->pluck('total','employee_id');
+  $pendingLeaves = \App\Models\LeaveApplication::whereIn('employee_id', $empIds)
+      ->where('status','pending')
+      ->selectRaw('employee_id, COUNT(*) as cnt')->groupBy('employee_id')
+      ->pluck('cnt','employee_id');
 @endphp
 <div style="margin-bottom:10px;font-family:'Times New Roman',serif;text-align:center">
   <div style="font-weight:700;font-size:15px;letter-spacing:1px">ATTENDANTS SUMMARY STATEMENT</div>
@@ -35,20 +46,32 @@
   <tbody>
     @foreach($employees as $i => $emp)
     @php
-      $empAtt   = $allAtt->get($emp->id, collect());
+      $empAtt = $allAtt->get($emp->id, collect());
+
+      // BUG-101 FIX: Count weekends using shift config, not global isWeekend()
       $we = 0;
-      for($d=1;$d<=$daysInMonth;$d++){$day=\Carbon\Carbon::createFromDate($year,$mon,$d);if($day->isWeekend())$we++;}
-      $ww       = $empAtt->where('status','extra_present')->count();
-      $present  = $empAtt->whereIn('status',['present','late','half_day'])->count() + $ww;
-      $absent   = $empAtt->where('status','absent')->count();
-      $apLeave  = \App\Models\LeaveApplication::where('employee_id',$emp->id)->where('status','approved')
-                    ->whereYear('from_date',$year)->whereMonth('from_date',$mon)->sum('total_days');
-      $late     = $empAtt->where('status','late')->count();
-      $latAbst  = max(0,$absent);
-      $ovLate   = $empAtt->where('late_minutes','>',60)->count();
-      $pndLev   = \App\Models\LeaveApplication::where('employee_id',$emp->id)->where('status','pending')->count();
-      $dutyDays = $daysInMonth - $we - $totalHolidays;
-      $netPaid  = max(0, $present);
+      for($d=1; $d<=$daysInMonth; $d++) {
+          $day     = \Carbon\Carbon::createFromDate($year,$mon,$d);
+          $dateStr = $day->format('Y-m-d');
+          $dayName = strtolower($day->format('l'));
+          $shift   = $emp->getShiftForDate($dateStr);
+          $isWknd  = $shift ? !(bool)($shift->$dayName) : $day->isWeekend();
+          if ($isWknd) $we++;
+      }
+
+      $ww      = $empAtt->where('status','extra_present')->count()
+               + $empAtt->where('status','present')->whereIn('date', $empAtt->where('status','weekend')->pluck('date'))->count();
+      $present = $empAtt->whereIn('status',['present','late','half_day'])->count() + $ww;
+      $absent  = $empAtt->where('status','absent')->count();
+      $late    = $empAtt->where('status','late')->count();
+      // BUG-111 FIX: Late Absent = floor(late / 3), not absent count
+      $latAbst = (int)floor($late / 3);
+      $ovLate  = $empAtt->where('late_minutes','>',60)->count();
+      // BUG-102 FIX: Use pre-loaded leave summaries
+      $apLeave = $approvedLeaves->get($emp->id, 0);
+      $pndLev  = $pendingLeaves->get($emp->id, 0);
+      $dutyDays= $daysInMonth - $we - $totalHolidays;
+      $netPaid = max(0, $present);
     @endphp
     <tr style="background:{{ $i%2==0?'#fff':'#f9fafb' }}">
       <td style="border:1px solid #ddd;padding:4px 6px;text-align:center">{{ $i+1 }}</td>
@@ -74,5 +97,5 @@
   </tbody>
 </table>
 <div style="margin-top:8px;font-size:10px;color:#64748b">
-  <strong>Legend:</strong> W.E.=Weekend, W.W.=Weekend Work, AP=Annual/Privileged Leave, FL=Festival Leave, SL=Sick Leave, Lat Abst=Late Absent, Ov. Late=Over Late (&gt;60 min), Pnd.Lev=Pending Leave
+  <strong>Legend:</strong> W.E.=Weekend, W.W.=Weekend Work, AP=Annual/Privileged Leave, FL=Festival Leave, SL=Sick Leave, Lat Abst=Late Absent (3 lates=1 absent), Ov. Late=Over Late (&gt;60 min), Pnd.Lev=Pending Leave
 </div>

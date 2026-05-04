@@ -31,8 +31,12 @@ class Shift extends Model
 
     public function getWorkingMinutesAttribute(): int
     {
-        [$sh,$sm] = explode(':', $this->start_time);
-        [$eh,$em] = explode(':', $this->end_time);
-        return ($eh * 60 + $em) - ($sh * 60 + $sm) - $this->break_minutes;
+        // BUG-107 & BUG-116 FIX: Use Carbon for robust parsing, handle overnight shifts
+        $start = \Carbon\Carbon::parse($this->start_time);
+        $end   = \Carbon\Carbon::parse($this->end_time);
+        $mins  = $end->diffInMinutes($start);
+        // If end < start, it's an overnight shift — add 24h
+        if ($end->lt($start)) $mins += 1440;
+        return max(0, $mins - ($this->break_minutes ?? 0));
     }
 }

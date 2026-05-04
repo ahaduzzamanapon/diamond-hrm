@@ -109,7 +109,9 @@
       <div class="modal-body">
         <div class="form-group"><label class="form-label">Status</label>
           <select name="status" id="editStatus" class="form-control">
-            @foreach(['present','absent','late','half_day','leave'] as $s)<option value="{{ $s }}">{{ ucfirst(str_replace('_',' ',$s)) }}</option>@endforeach
+            @foreach(['present','absent','late','half_day','leave','holiday','weekend'] as $s)
+              <option value="{{ $s }}">{{ ucfirst(str_replace('_',' ',$s)) }}</option>
+            @endforeach
           </select>
         </div>
         <div class="grid g-2 gap-12">
@@ -128,8 +130,9 @@
 function editAtt(id, status, checkIn, checkOut, note) {
   document.getElementById('editForm').action = '/attendance/' + id;
   document.getElementById('editStatus').value = status;
-  document.getElementById('editIn').value = checkIn ? checkIn.substr(11,5) : '';
-  document.getElementById('editOut').value = checkOut ? checkOut.substr(11,5) : '';
+  // BUG-123 FIX: in_time is 'HH:MM:SS' format (no date prefix) — take first 5 chars
+  document.getElementById('editIn').value = checkIn ? checkIn.substring(0, 5) : '';
+  document.getElementById('editOut').value = checkOut ? checkOut.substring(0, 5) : '';
   document.getElementById('editNote').value = note;
   document.getElementById('editModal').classList.add('open');
 }

@@ -15,18 +15,27 @@ class AdvanceSalaryController extends Controller
     {
         $user = Auth::user();
 
-        // Get employees for dropdown only if user is HR/Admin (can manage)
-        $employees = [];
-        $isHr = $user->hasPermissionTo('manage_employees'); // Or check role 'hr', 'hr-admin'
-        if ($isHr) {
-            $employees = Employee::where('status', 'active')->get();
+        // BUG-109 FIX: branch-based access control
+        $isHr = $user->hasPermissionTo('manage_employees');
+        $employees = $isHr
+            ? Employee::where('status', 'active')->get()
+            : [];
+
+        $query = AdvanceSalary::with(['employee.branch', 'installments']);
+        if ($isHr && $user->hasPermissionTo('view_all_branches')) {
+            // super-admin sees all
+        } elseif ($isHr) {
+            // branch HR — only their branch
+            $query->whereHas('employee', fn($e) => $e->where('branch_id', $user->branch_id));
+        } else {
+            // regular staff — own records only
+            if ($user->employee) {
+                $query->where('employee_id', $user->employee->id);
+            } else {
+                $query->whereRaw('0=1'); // no employee linked → empty
+            }
         }
 
-        // Query Advance Salaries
-        $query = AdvanceSalary::with('employee');
-        if (!$isHr && $user->employee) {
-            $query->where('employee_id', $user->employee->id);
-        }
         $advanceSalaries = $query->latest()->get();
 
         return view('advance_salary.index', compact('advanceSalaries', 'employees', 'isHr'));
@@ -35,21 +44,20 @@ class AdvanceSalaryController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'employee_id'        => 'nullable|exists:employees,id',
-            'amount'             => 'required|numeric|min:1',
-            'received_date'      => 'required|date',
-            'start_deduct_month' => 'required',
-            'installment_count'  => 'required|integer|min:1',
-            'installments'       => 'required|array',
+            'employee_id'       => 'nullable|exists:employees,id',
+            'amount'            => 'required|numeric|min:1',
+            'received_date'     => 'required|date',
+            'start_deduct_month'=> 'required',
+            'installment_count' => 'required|integer|min:1',
+            'installments'      => 'required|array',
             'installments.*.month'  => 'required|string',
             'installments.*.amount' => 'required|numeric|min:1',
-            'action'             => 'required|in:draft,submit'
+            'action'            => 'required|in:draft,submit',
         ]);
 
         $user = Auth::user();
         $isHr = $user->hasPermissionTo('manage_employees');
 
-        // Determine correct Employee ID
         if (!$isHr) {
             if (!$user->employee) {
                 return back()->with('error', 'You do not have a linked employee record.');
@@ -62,15 +70,14 @@ class AdvanceSalaryController extends Controller
             }
         }
 
-        // Verify installments sum
+        // Verify installments sum matches total amount
         $sum = collect($request->installments)->sum('amount');
         if (round($sum, 2) != round($request->amount, 2)) {
             return back()->with('error', 'Installments total must match the requested amount.');
         }
 
         DB::transaction(function () use ($request, $employeeId) {
-            $status = $request->action === 'draft' ? 'draft' : 'pending';
-
+            $status  = $request->action === 'draft' ? 'draft' : 'pending';
             $advance = AdvanceSalary::create([
                 'employee_id'        => $employeeId,
                 'amount'             => $request->amount,
@@ -87,12 +94,13 @@ class AdvanceSalaryController extends Controller
                     'installment_no'    => $index + 1,
                     'deduct_month'      => $inst['month'],
                     'amount'            => $inst['amount'],
-                    'is_deducted'       => false
+                    'is_deducted'       => false,
                 ]);
             }
         });
 
-        return back()->with('success', 'Advanced Salary Request ' . ($request->action === 'draft' ? 'saved as draft' : 'submitted successfully') . '!');
+        $msg = $request->action === 'draft' ? 'saved as draft' : 'submitted successfully';
+        return back()->with('success', "Advanced Salary Request {$msg}!");
     }
 
     public function show(AdvanceSalary $advanceSalary)
@@ -100,11 +108,47 @@ class AdvanceSalaryController extends Controller
         $user = Auth::user();
         $isHr = $user->hasPermissionTo('manage_employees');
 
+        // Staff can only view their own; HR can view branch's records
         if (!$isHr && $user->employee && $advanceSalary->employee_id != $user->employee->id) {
-            abort(403, 'Unauthorized viewing of this record.');
+            abort(403, 'Unauthorized.');
         }
 
         $advanceSalary->load('employee', 'installments');
         return view('advance_salary.show', compact('advanceSalary'));
+    }
+
+    // ── BUG-104 FIX: Approve advance salary request ────────────────────────────
+    public function approve(Request $request, AdvanceSalary $advanceSalary)
+    {
+        $user = Auth::user();
+        if (!$user->hasPermissionTo('manage_employees')) {
+            abort(403, 'Unauthorized.');
+        }
+
+        if (!in_array($advanceSalary->status, ['pending', 'draft'])) {
+            return back()->with('error', 'Only pending/draft requests can be approved.');
+        }
+
+        $advanceSalary->update([
+            'status'      => 'approved',
+            'approved_by' => $user->id,
+        ]);
+
+        return back()->with('success', 'Advance salary approved!');
+    }
+
+    // ── BUG-104 FIX: Reject advance salary request ────────────────────────────
+    public function reject(Request $request, AdvanceSalary $advanceSalary)
+    {
+        $user = Auth::user();
+        if (!$user->hasPermissionTo('manage_employees')) {
+            abort(403, 'Unauthorized.');
+        }
+
+        $advanceSalary->update([
+            'status' => 'rejected',
+        ]);
+
+        return back()->with('success', 'Advance salary rejected.');
     }
 }

@@ -40,8 +40,13 @@ class DashboardController extends Controller
         $onLeaveToday = $attQ()->where('status', 'leave')->count();
 
         // ── Pending Items ──────────────────────────────────────────────────
-        $pendingLeaves = LeaveApplication::where('status', 'pending')->count();
-        $pendingExtra  = ExtraPresentRequest::where('status', 'pending')->count();
+        // BUG-019 FIX: filter pending counts by branch
+        $pendingLeaves = LeaveApplication::where('status', 'pending')
+            ->when($branchId, fn($q) => $q->whereHas('employee', fn($e) => $e->where('branch_id', $branchId)))
+            ->count();
+        $pendingExtra  = ExtraPresentRequest::where('status', 'pending')
+            ->when($branchId, fn($q) => $q->whereHas('employee', fn($e) => $e->where('branch_id', $branchId)))
+            ->count();
 
 
         // ── Last 7 Days Chart ──────────────────────────────────────────────
@@ -49,8 +54,13 @@ class DashboardController extends Controller
         for ($i = 6; $i >= 0; $i--) {
             $d = Carbon::today()->subDays($i);
             $chartLabels[]  = $d->format('D d');
-            $chartPresent[] = Attendance::whereDate('date', $d)->where('status', 'present')->count();
-            $chartAbsent[]  = Attendance::whereDate('date', $d)->where('status', 'absent')->count();
+            // BUG-011 FIX: include late & half_day in present count
+            $chartPresent[] = Attendance::whereDate('date', $d)
+                ->when($branchId, fn($q) => $q->whereHas('employee', fn($e) => $e->where('branch_id', $branchId)))
+                ->whereIn('status', ['present','late','half_day'])->count();
+            $chartAbsent[]  = Attendance::whereDate('date', $d)
+                ->when($branchId, fn($q) => $q->whereHas('employee', fn($e) => $e->where('branch_id', $branchId)))
+                ->where('status', 'absent')->count();
         }
 
         // ── Department Distribution ────────────────────────────────────────
@@ -59,12 +69,14 @@ class DashboardController extends Controller
         // ── Branches ──────────────────────────────────────────────────────
         $branches = Branch::withCount('employees')->where('is_active', true)->get();
 
-        // ── Upcoming Birthdays ─────────────────────────────────────────────
-        $birthdays = Employee::where('status', 'active')->whereNotNull('date_of_birth')->get()
-            ->filter(function ($emp) {
-                $bday = Carbon::parse($emp->date_of_birth)->setYear(now()->year);
-                return $bday->isToday() || ($bday->isFuture() && $bday->diffInDays(now()) <= 7);
-            })->take(5);
+        // BUG-121 FIX: Use SQL date comparison instead of loading all employees into memory
+        $todayMD = now()->format('m-d');
+        $in7days = now()->addDays(7)->format('m-d');
+        $birthdays = Employee::where('status', 'active')
+            ->whereNotNull('date_of_birth')
+            ->whereRaw("DATE_FORMAT(date_of_birth, '%m-%d') BETWEEN ? AND ?", [$todayMD, $in7days])
+            ->take(5)
+            ->get();
 
         // ── Latest Notices ─────────────────────────────────────────────────
         $notices = Notice::where('is_published', true)

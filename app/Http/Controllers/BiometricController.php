@@ -37,6 +37,16 @@ class BiometricController extends Controller
         return back()->with('success','Device added!');
     }
 
+    public function updateDevice(Request $request, BiometricDevice $device)
+    {
+        $request->validate([
+            'name'      => 'required',
+            'branch_id' => 'required|exists:branches,id',
+        ]);
+        $device->update($request->only('name','branch_id','ip_address'));
+        return back()->with('success','Device updated!');
+    }
+
     public function destroyDevice(BiometricDevice $device)
     {
         $device->delete();
@@ -62,9 +72,6 @@ class BiometricController extends Controller
                 });
             });
 
-        \Illuminate\Support\Facades\Log::info("User ID: {$user->id}, Is SuperAdmin: " . ($user->hasPermissionTo('view_all_branches') ? 'Yes' : 'No'));
-        \Illuminate\Support\Facades\Log::info($logs->toSql(), $logs->getBindings());
-
         $logs = $logs->whereYear('punch_time',$yr)->whereMonth('punch_time',$mn)
             ->orderByDesc('punch_time')->paginate(50)->withQueryString();
 
@@ -83,6 +90,11 @@ class BiometricController extends Controller
 
     public function updateMapping(Request $request)
     {
+        // BUG-120 FIX: only HR/admin can remap biometric IDs
+        if (!Auth::user()->hasPermissionTo('manage_employees')) {
+            abort(403, 'Unauthorized.');
+        }
+
         foreach ($request->mappings ?? [] as $empId => $bioId) {
             \App\Models\Employee::where('id',$empId)->update(['biometric_user_id' => $bioId ?: null]);
             if ($bioId) {
@@ -124,19 +136,33 @@ class BiometricController extends Controller
         $updated = 0;
         $skipped = 0;
 
+        // ── BUG-006 FIX: Pre-load attendance for all employees & dates in this batch ──
+        $empIds    = $logs->pluck('employee_id')->unique()->filter();
+        $dateMin   = $logs->min(fn($l) => Carbon::parse($l->punch_time)->format('Y-m-d'));
+        $dateMax   = $logs->max(fn($l) => Carbon::parse($l->punch_time)->format('Y-m-d'));
+        $existingMap = Attendance::whereIn('employee_id', $empIds)
+            ->whereBetween('date', [$dateMin, $dateMax])
+            ->get()
+            ->groupBy(fn($a) => $a->employee_id . '_' . $a->date->format('Y-m-d'));
+
+        // Pre-load device→branch map so we don't query per-log
+        $deviceBranchMap = \App\Models\BiometricDevice::whereNotNull('branch_id')
+            ->pluck('branch_id', 'serial_number');
+
         foreach ($logs as $log) {
             $employee = $log->employee;
             if (!$employee) { $skipped++; continue; }
 
             $date         = Carbon::parse($log->punch_time)->format('Y-m-d');
             $punchTime    = Carbon::parse($log->punch_time)->format('H:i:s');
-            $dayName      = strtolower(Carbon::parse($date)->format('l')); // 'monday','friday' etc.
+            $dayName      = strtolower(Carbon::parse($date)->format('l'));
 
             // Get shift for this date — respects transfer history, no N+1
             $shiftForDate = $employee->getShiftForDate($date);
 
-            $existing = Attendance::where('employee_id', $employee->id)
-                ->where('date', $date)->first();
+            // BUG-006 FIX: Use pre-loaded map instead of per-record DB query
+            $key      = $employee->id . '_' . $date;
+            $existing = $existingMap->get($key)?->first();
 
             if (!$existing) {
                 // ── First punch of the day: clock-in ──────────────────────────
@@ -162,12 +188,15 @@ class BiometricController extends Controller
                 };
 
                 $att = Attendance::create([
-                    'employee_id'  => $employee->id,
-                    'date'         => $date,
-                    'in_time'      => $punchTime,
-                    'status'       => $finalSt,
-                    'late_minutes' => $late,
-                    'source'       => 'biometric',
+                    'employee_id'     => $employee->id,
+                    'date'            => $date,
+                    'in_time'         => $punchTime,
+                    'in_device_serial'=> $log->device_serial,
+                    // Fallback to employee's branch if device has no branch assigned
+                    'in_branch_id'    => $deviceBranchMap->get($log->device_serial) ?? $employee->branch_id,
+                    'status'          => $finalSt,
+                    'late_minutes'    => $late,
+                    'source'          => 'biometric',
                 ]);
 
                 // Auto-create extra present request for holiday/weekend punches
@@ -200,10 +229,13 @@ class BiometricController extends Controller
                     }
 
                     $existing->update([
-                        'in_time'      => $punchTime,
-                        'status'       => $status,
-                        'late_minutes' => $late,
-                        'source'       => 'biometric',
+                        'in_time'          => $punchTime,
+                        'in_device_serial' => $log->device_serial,
+                        // Fallback to employee's branch if device has no branch assigned
+                        'in_branch_id'     => $deviceBranchMap->get($log->device_serial) ?? $employee->branch_id,
+                        'status'           => $status,
+                        'late_minutes'     => $late,
+                        'source'           => 'biometric',
                     ]);
                     $updated++;
                 } else {
@@ -216,9 +248,12 @@ class BiometricController extends Controller
                         : 0;
 
                     $existing->update([
-                        'out_time'         => $punchTime,
-                        'working_minutes'  => $workMin,
-                        'overtime_minutes' => $overtime,
+                        'out_time'          => $punchTime,
+                        'out_device_serial' => $log->device_serial,
+                        // Fallback to employee's branch if device has no branch assigned
+                        'out_branch_id'     => $deviceBranchMap->get($log->device_serial) ?? $employee->branch_id,
+                        'working_minutes'   => $workMin,
+                        'overtime_minutes'  => $overtime,
                     ]);
                     $updated++;
                 }

@@ -49,13 +49,20 @@ class LeaveController extends Controller
                 'reason'       => 'required|string',
             ]);
 
-            $from  = Carbon::parse($request->from_date);
-            $to    = Carbon::parse($request->to_date);
-            $days  = 0;
-            $cur   = $from->copy();
+            // ── BUG-002 FIX: use shift-based weekend detection per employee ──
+            $employee = Employee::with(['shift','transfers.fromShift','transfers.toShift'])
+                ->findOrFail($request->employee_id);
+
+            $from = Carbon::parse($request->from_date);
+            $to   = Carbon::parse($request->to_date);
+            $days = 0;
+            $cur  = $from->copy();
+
             while ($cur->lte($to)) {
-                $isHoliday = Holiday::whereDate('date',$cur)->exists();
-                $isWeekend = in_array($cur->dayOfWeek,[0,6]);
+                $isHoliday  = Holiday::whereDate('date', $cur)->exists();
+                $dayName    = strtolower($cur->format('l'));
+                $shift      = $employee->getShiftForDate($cur->format('Y-m-d'));
+                $isWeekend  = $shift ? !(bool)($shift->$dayName) : $cur->isWeekend();
                 if (!$isHoliday && !$isWeekend) $days++;
                 $cur->addDay();
             }
@@ -80,9 +87,9 @@ class LeaveController extends Controller
             return redirect()->route('leaves.index')->with('success','Leave applied!');
         }
 
-        $user       = Auth::user();
+        $user = Auth::user();
         if ($user->hasRole(['super-admin', 'hr-admin', 'hr', 'branch-manager']) || $user->hasPermissionTo('view_all_branches')) {
-            $employees  = Employee::forUser($user)->where('status','active')->get();
+            $employees = Employee::forUser($user)->where('status','active')->get();
         } else {
             $employees = $user->employee ? collect([$user->employee]) : collect();
         }
@@ -93,8 +100,8 @@ class LeaveController extends Controller
     public function approve(Request $request, LeaveApplication $leave)
     {
         $user   = Auth::user();
-        $action = $request->action; // 'approve' or 'reject'
-        $level  = $request->level;  // 'bm' or 'hr'
+        $action = $request->action;
+        $level  = $request->level;
 
         if ($level === 'bm' && $user->hasRole(['branch-manager','hr-admin','super-admin'])) {
             if ($action === 'approve') {
@@ -105,13 +112,26 @@ class LeaveController extends Controller
         } elseif ($level === 'hr' && $user->hasRole(['hr','hr-admin','super-admin'])) {
             if ($action === 'approve' && $leave->bm_status === 'approved') {
                 $leave->update(['status'=>'approved','approved_by'=>$user->id,'approved_at'=>now(),'remarks'=>$request->remarks]);
-                // Mark attendance as leave
+
+                // ── BUG-016 FIX: Skip weekends/holidays when marking attendance as leave ──
+                $employee = Employee::with(['shift','transfers.fromShift','transfers.toShift'])
+                    ->find($leave->employee_id);
+
                 $cur = Carbon::parse($leave->from_date);
                 while ($cur->lte($leave->to_date)) {
-                    \App\Models\Attendance::updateOrCreate(
-                        ['employee_id'=>$leave->employee_id,'date'=>$cur->format('Y-m-d')],
-                        ['status'=>'leave','source'=>'manual']
-                    );
+                    $dateStr    = $cur->format('Y-m-d');
+                    $dayName    = strtolower($cur->format('l'));
+                    $shift      = $employee?->getShiftForDate($dateStr);
+                    $isWeekend  = $shift ? !(bool)($shift->$dayName) : $cur->isWeekend();
+                    $isHoliday  = \App\Models\Holiday::whereDate('date', $dateStr)->exists();
+
+                    // Only mark as leave on actual working days
+                    if (!$isWeekend && !$isHoliday) {
+                        \App\Models\Attendance::updateOrCreate(
+                            ['employee_id' => $leave->employee_id, 'date' => $dateStr],
+                            ['status' => 'leave', 'source' => 'manual']
+                        );
+                    }
                     $cur->addDay();
                 }
             } else {
@@ -139,7 +159,6 @@ class LeaveController extends Controller
         $leave->update(['status' => 'cancelled']);
         return back()->with('success', 'Leave cancelled.');
     }
-
 
     // Staff: get own leave balance
     public function balance(Request $request)

@@ -130,6 +130,7 @@ Route::middleware(['auth'])->group(function () {
     Route::prefix('biometric')->name('biometric.')->group(function () {
         Route::get('/devices',              [BiometricController::class, 'devices'])->name('devices');
         Route::post('/devices',             [BiometricController::class, 'storeDevice'])->name('devices.store');
+        Route::put('/devices/{device}', [BiometricController::class, 'updateDevice'])->name('devices.update');
         Route::delete('/devices/{device}',  [BiometricController::class, 'destroyDevice'])->name('devices.destroy');
         Route::get('/logs',                 [BiometricController::class, 'logs'])->name('logs');
         Route::get('/mapping',              [BiometricController::class, 'mapping'])->name('mapping');
@@ -145,6 +146,10 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/process', [\App\Http\Controllers\PayrollController::class, 'process'])->name('process');
         Route::get('/modal', [\App\Http\Controllers\PayrollController::class, 'reportModal'])->name('modal');
         Route::resource('advance-salary', \App\Http\Controllers\AdvanceSalaryController::class)->only(['index', 'store', 'show']);
+        // BUG-104 FIX: approve/reject routes for advance salary
+        Route::post('advance-salary/{advanceSalary}/approve', [\App\Http\Controllers\AdvanceSalaryController::class, 'approve'])->name('advance-salary.approve');
+        Route::post('advance-salary/{advanceSalary}/reject',  [\App\Http\Controllers\AdvanceSalaryController::class, 'reject'])->name('advance-salary.reject');
+
     });
 
     // ── Settings ─────────────────────────────────────────────────────────────
