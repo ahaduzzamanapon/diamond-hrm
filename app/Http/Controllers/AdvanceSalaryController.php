@@ -76,6 +76,18 @@ class AdvanceSalaryController extends Controller
             return back()->with('error', 'Installments total must match the requested amount.');
         }
 
+        // Check for existing active/outstanding advance salary requests
+        $hasOutstanding = AdvanceSalary::where('employee_id', $employeeId)
+            ->whereIn('status', ['pending', 'approved'])
+            ->whereHas('installments', function($q) {
+                $q->where('is_deducted', false);
+            })
+            ->exists();
+
+        if ($hasOutstanding) {
+            return back()->with('error', 'This employee already has an outstanding or pending advance salary request.');
+        }
+
         DB::transaction(function () use ($request, $employeeId) {
             $status  = $request->action === 'draft' ? 'draft' : 'pending';
             $advance = AdvanceSalary::create([

@@ -50,6 +50,9 @@ class ShiftController extends Controller
 
     public function destroy(Shift $shift)
     {
+        if ($shift->employees()->exists()) {
+            return back()->with('error', 'Cannot delete shift because it is currently assigned to employees. Please reassign the employees first.');
+        }
         $shift->delete();
         return back()->with('success', 'Shift deleted.');
     }

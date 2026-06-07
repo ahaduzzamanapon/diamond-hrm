@@ -67,7 +67,15 @@ class PayrollController extends Controller
                 $house     = $employee->house_rent_allowance ?? 0;
                 $medical   = $employee->medical_allowance ?? 0;
                 $transport = $employee->transport_allowance ?? 0;
-                $gross     = $basic + $house + $medical + $transport;
+
+                // Extra present request pay
+                $extraPay = \App\Models\ExtraPresentRequest::where('employee_id', $empId)
+                    ->where('status', 'approved')
+                    ->whereYear('date', $carbonMonth->year)
+                    ->whereMonth('date', $carbonMonth->month)
+                    ->sum('extra_pay');
+
+                $gross     = $basic + $house + $medical + $transport + $extraPay;
 
                 // ── Attendance counts ──────────────────────────────────────
                 $attendances = \App\Models\Attendance::where('employee_id', $empId)
@@ -84,6 +92,40 @@ class PayrollController extends Controller
                 $holidayDays = $attendances->where('status', 'holiday')->count();
                 $weekendDays = $attendances->where('status', 'weekend')->count();
 
+                // Unpaid leaves calculation
+                $leaveDates = $attendances->where('status', 'leave')->pluck('date')->map(fn($d) => $d->format('Y-m-d'))->toArray();
+                $unpaidLeaveDays = 0;
+                if (!empty($leaveDates)) {
+                    $unpaidLeaveDays = \App\Models\LeaveApplication::where('employee_id', $empId)
+                        ->where('status', 'approved')
+                        ->whereHas('leaveType', function($q) {
+                            $q->where('is_paid', false);
+                        })
+                        ->where(function($q) use ($leaveDates) {
+                            foreach ($leaveDates as $date) {
+                                $q->orWhere(function($sub) use ($date) {
+                                    $sub->where('from_date', '<=', $date)
+                                        ->where('to_date', '>=', $date);
+                                });
+                            }
+                        })
+                        ->get()
+                        ->flatMap(function($app) use ($leaveDates) {
+                            $from = Carbon::parse($app->from_date);
+                            $to = Carbon::parse($app->to_date);
+                            $matched = [];
+                            foreach ($leaveDates as $dStr) {
+                                $d = Carbon::parse($dStr);
+                                if ($d->gte($from) && $d->lte($to)) {
+                                    $matched[] = $dStr;
+                                }
+                            }
+                            return $matched;
+                        })
+                        ->unique()
+                        ->count();
+                }
+
                 // ── BUG-003 FIX: use actual working days not daysInMonth ───
                 // Working days = all days that are not weekend/holiday
                 $workingDays = $attendances
@@ -96,14 +138,14 @@ class PayrollController extends Controller
                 $latePenaltyAbsents = (int)floor($lateDays / 3);
                 // Half day = 0.5 day deduction
                 $halfDayDeductions  = $halfDays * 0.5;
-                $totalUnpaidAbsents = $absentDays + $latePenaltyAbsents + $halfDayDeductions;
+                $totalUnpaidAbsents = $absentDays + $latePenaltyAbsents + $halfDayDeductions + $unpaidLeaveDays;
 
                 $paidDays = max(0, $workingDays - $totalUnpaidAbsents);
 
                 // Daily salary based on working days
                 $dailySalary = $workingDays > 0 ? ($gross / $workingDays) : 0;
 
-                $absentDed  = $absentDays * $dailySalary;
+                $absentDed  = ($absentDays + $unpaidLeaveDays) * $dailySalary;
                 $lateDed    = $latePenaltyAbsents * $dailySalary;
                 $halfDayDed = $halfDays * ($dailySalary * 0.5);
 
@@ -135,11 +177,12 @@ class PayrollController extends Controller
                 $payroll->weekend_days  = $weekendDays;
                 $payroll->paid_days     = $paidDays;
 
-                $payroll->basic_salary  = $basic;
-                $payroll->house_rent    = $house;
-                $payroll->medical       = $medical;
-                $payroll->transport     = $transport;
-                $payroll->gross_salary  = $gross;
+                $payroll->basic_salary    = $basic;
+                $payroll->house_rent      = $house;
+                $payroll->medical         = $medical;
+                $payroll->transport       = $transport;
+                $payroll->other_allowance = $extraPay;
+                $payroll->gross_salary    = $gross;
 
                 $payroll->absent_deduction         = $absentDed + $halfDayDed;
                 $payroll->late_deduction           = $lateDed;
@@ -149,6 +192,14 @@ class PayrollController extends Controller
                 $payroll->net_salary = $netSalary;
                 $payroll->status     = $isFinal ? 'final' : 'draft';
                 $payroll->save();
+
+                if ($isFinal) {
+                    \App\Models\ExtraPresentRequest::where('employee_id', $empId)
+                        ->where('status', 'approved')
+                        ->whereYear('date', $carbonMonth->year)
+                        ->whereMonth('date', $carbonMonth->month)
+                        ->update(['added_to_payroll' => true]);
+                }
             }
         });
 

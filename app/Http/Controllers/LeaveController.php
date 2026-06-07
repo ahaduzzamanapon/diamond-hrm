@@ -49,6 +49,17 @@ class LeaveController extends Controller
                 'reason'       => 'required|string',
             ]);
 
+            // Check if there is an overlapping pending or approved leave application
+            $exists = LeaveApplication::where('employee_id', $request->employee_id)
+                ->whereIn('status', ['pending', 'approved'])
+                ->where('from_date', '<=', $request->to_date)
+                ->where('to_date', '>=', $request->from_date)
+                ->exists();
+
+            if ($exists) {
+                return back()->withInput()->withErrors(['from_date' => 'The employee already has an active (pending or approved) leave application that overlaps with this period.']);
+            }
+
             // ── BUG-002 FIX: use shift-based weekend detection per employee ──
             $employee = Employee::with(['shift','transfers.fromShift','transfers.toShift'])
                 ->findOrFail($request->employee_id);
@@ -145,25 +156,105 @@ class LeaveController extends Controller
     public function reject(Request $request, LeaveApplication $leave)
     {
         $user = Auth::user();
+        $wasApproved = ($leave->status === 'approved');
         $leave->update([
             'status'      => 'rejected',
             'approved_by' => $user->id,
             'approved_at' => now(),
             'remarks'     => $request->remarks,
         ]);
+
+        if ($wasApproved) {
+            $this->revertLeaveAttendance($leave);
+        }
+
         return back()->with('success', 'Leave rejected.');
     }
 
     public function destroy(LeaveApplication $leave)
     {
+        $wasApproved = ($leave->status === 'approved');
         $leave->update(['status' => 'cancelled']);
+
+        if ($wasApproved) {
+            $this->revertLeaveAttendance($leave);
+        }
+
         return back()->with('success', 'Leave cancelled.');
+    }
+
+    private function revertLeaveAttendance(LeaveApplication $leave)
+    {
+        $employee = Employee::with(['shift', 'transfers.fromShift', 'transfers.toShift'])->find($leave->employee_id);
+        if (!$employee) return;
+
+        $cur = Carbon::parse($leave->from_date);
+        $to = Carbon::parse($leave->to_date);
+
+        while ($cur->lte($to)) {
+            $dateStr = $cur->format('Y-m-d');
+            $att = \App\Models\Attendance::where('employee_id', $leave->employee_id)
+                ->whereDate('date', $dateStr)
+                ->first();
+
+            if ($att && $att->status === 'leave') {
+                if (!$att->in_time && !$att->out_time) {
+                    $att->delete();
+                } else {
+                    $shiftForDate = $employee->getShiftForDate($dateStr);
+                    $status = 'present';
+                    $late = 0;
+                    if ($att->in_time && $shiftForDate) {
+                        $shiftStart = Carbon::parse($dateStr . ' ' . $shiftForDate->start_time);
+                        $inTime     = Carbon::parse($dateStr . ' ' . $att->in_time);
+                        $late       = max(0, $inTime->diffInMinutes($shiftStart, false) * -1);
+                        if ($late > ($shiftForDate->grace_minutes ?? 0)) {
+                            $status = 'late';
+                        }
+                    }
+                    $att->update([
+                        'status'       => $status,
+                        'late_minutes' => $late,
+                    ]);
+                }
+            }
+            $cur->addDay();
+        }
     }
 
     // Staff: get own leave balance
     public function balance(Request $request)
     {
-        $employee   = Employee::where('user_id', Auth::id())->firstOrFail();
+        $user = Auth::user();
+        $employeeId = $request->employee_id;
+        $employees = collect();
+
+        if ($user->hasRole(['super-admin', 'hr-admin', 'hr', 'branch-manager']) || $user->hasPermissionTo('view_all_branches')) {
+            $employees = Employee::where('status', 'active')
+                ->when(!$user->hasPermissionTo('view_all_branches'), fn($q) => $q->where('branch_id', $user->branch_id))
+                ->orderBy('name')
+                ->get();
+        }
+
+        if ($employeeId && ($user->hasRole(['super-admin', 'hr-admin', 'hr', 'branch-manager']) || $user->hasPermissionTo('view_all_branches'))) {
+            $employee = Employee::find($employeeId);
+            if (!$employee) {
+                return redirect()->route('leaves.balance')->with('error', 'Employee not found.');
+            }
+            if (!$user->hasPermissionTo('view_all_branches') && $employee->branch_id !== $user->branch_id) {
+                abort(403, 'Unauthorized.');
+            }
+        } else {
+            $employee = Employee::where('user_id', $user->id)->first();
+            if (!$employee) {
+                if (!$employees->isEmpty()) {
+                    $employee = $employees->first();
+                } else {
+                    return redirect()->back()->with('error', 'No employee profile linked to your user account.');
+                }
+            }
+        }
+
         $leaveTypes = LeaveType::where('is_active', true)->get();
         $year       = $request->year ?? now()->year;
 
@@ -180,6 +271,6 @@ class LeaveController extends Controller
             ];
         });
 
-        return view('leaves.balance', compact('balances','year','employee'));
+        return view('leaves.balance', compact('balances','year','employee','employees'));
     }
 }

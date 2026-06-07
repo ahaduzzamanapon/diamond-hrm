@@ -183,12 +183,17 @@ class AttendanceController extends Controller
                 $late       = max(0, $inTime->diffInMinutes($shiftStart, false) * -1);
             }
 
+            $status = $request->status;
+            if ($status === 'present' && $late > ($shift->grace_minutes ?? 0)) {
+                $status = 'late';
+            }
+
             $att = Attendance::updateOrCreate(
                 ['employee_id' => $request->employee_id, 'date' => $request->date],
                 [
                     'in_time'     => $request->in_time,
                     'out_time'    => $request->out_time,
-                    'status'      => $late > ($shift->grace_minutes ?? 0) ? 'late' : $request->status,
+                    'status'      => $status,
                     'late_minutes'=> $late,
                     'source'      => 'manual',
                     'note'        => $request->note,
@@ -285,6 +290,12 @@ class AttendanceController extends Controller
             $holidays = Holiday::whereYear('date',$year)->whereMonth('date',$mon)->pluck('name','date');
             $totalHolidays = $holidays->count();
 
+            // Fetch approved short leaves for the month
+            $shortLeaves = \App\Models\ShortLeave::whereIn('employee_id', $employees->pluck('id'))
+                ->where('status', 'approved')
+                ->whereYear('date', $year)->whereMonth('date', $mon)
+                ->get();
+
             // For register: load biometric logs grouped by emp_date_punchtype for device name
             $bioLogs = collect();
             if ($type === 'monthly_register') {
@@ -302,7 +313,7 @@ class AttendanceController extends Controller
 
 
             $html = view('attendance.partials.'.$type, compact(
-                'employees','allAtt','daysInMonth','holidays','totalHolidays','year','mon','month','bioLogs'
+                'employees','allAtt','daysInMonth','holidays','totalHolidays','year','mon','month','bioLogs','shortLeaves'
             ))->render();
             return response()->json(['html' => $html]);
         }
@@ -321,13 +332,20 @@ class AttendanceController extends Controller
 
         $records = $attQuery->orderBy('date')->orderBy('employee_id')->get();
 
+        // Fetch approved short leaves for the date range
+        $shortLeaves = \App\Models\ShortLeave::whereIn('employee_id', $employees->pluck('id'))
+            ->where('status', 'approved')
+            ->whereBetween('date', [$date1, $date2])
+            ->get()
+            ->groupBy(fn($sl) => $sl->employee_id . '_' . $sl->date->format('Y-m-d'));
+
         // Continuous: group by employee
         if (in_array($type, ['continuous','performance','late_analysis'])) {
             $grouped = $records->groupBy('employee_id');
             $date1C = Carbon::parse($date1); $date2C = Carbon::parse($date2);
-            $html = view('attendance.partials.continuous', compact('employees','grouped','date1C','date2C','type'))->render();
+            $html = view('attendance.partials.continuous', compact('employees','grouped','date1C','date2C','type','shortLeaves'))->render();
         } else {
-            $html = view('attendance.partials.daily_table', compact('records','type','date1','date2'))->render();
+            $html = view('attendance.partials.daily_table', compact('records','type','date1','date2','shortLeaves'))->render();
         }
         return response()->json(['html' => $html]);
     }
@@ -402,8 +420,8 @@ class AttendanceController extends Controller
                 if ($existing->has($key)) {
                     $att = $existing->get($key)->first();
 
-                    // Never touch leave records
-                    if ($att->status === 'leave') {
+                    // Never touch leave or half_day records
+                    if (in_array($att->status, ['leave', 'half_day'])) {
                         $skipped++;
                         continue;
                     }

@@ -283,6 +283,10 @@
           <span class="nav-icon"><i class="bi bi-calendar2-check"></i></span>
           <span class="nav-label">Leave Types</span>
         </a>
+        <a href="{{ route('settings.payroll') }}" class="nav-item {{ request()->routeIs('settings.payroll') ? 'active' : '' }}">
+          <span class="nav-icon"><i class="bi bi-cash-coin"></i></span>
+          <span class="nav-label">Payroll Settings</span>
+        </a>
         <a href="{{ route('roles.index') }}" class="nav-item {{ request()->routeIs('roles.*') ? 'active' : '' }}">
           <span class="nav-icon"><i class="bi bi-shield-lock"></i></span>
           <span class="nav-label">Role Management</span>
@@ -433,10 +437,17 @@
 
   // ── Dropdowns ───────────────────────────────────────────────────────────
   document.querySelectorAll('.dropdown').forEach(dd => {
-    const trigger = dd.querySelector('[id$="Btn"], .topbar-avatar, .topbar-btn, .sidebar-user');
+    const trigger = dd.querySelector('[id$="Btn"], .topbar-avatar') || dd;
     const menu    = dd.querySelector('.dropdown-menu');
     if (!trigger || !menu) return;
-    trigger.addEventListener('click', e => { e.stopPropagation(); menu.classList.toggle('open'); });
+    trigger.addEventListener('click', e => {
+      if (menu.contains(e.target)) return;
+      e.stopPropagation();
+      document.querySelectorAll('.dropdown-menu').forEach(m => {
+        if (m !== menu) m.classList.remove('open');
+      });
+      menu.classList.toggle('open');
+    });
   });
   document.addEventListener('click', () => document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('open')));
 

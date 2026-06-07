@@ -89,8 +89,19 @@ class RequisitionController extends Controller
             return back()->with('error', 'Already supplied.');
         }
 
+        // Validate stock levels before transaction
+        foreach ($request->items ?? [] as $itemId => $qtySupplied) {
+            $reqItem = RequisitionItem::with('product')->find($itemId);
+            if ($reqItem && $reqItem->requisition_id === $requisition->id) {
+                $qty = (int)$qtySupplied;
+                if ($qty > 0 && $qty > ($reqItem->product->current_stock ?? 0)) {
+                    return back()->with('error', "Insufficient stock for product '{$reqItem->product->name}'. Available: {$reqItem->product->current_stock}, requested to supply: {$qty}.");
+                }
+            }
+        }
+
         DB::transaction(function () use ($request, $requisition) {
-            foreach ($request->items as $itemId => $qtySupplied) {
+            foreach ($request->items ?? [] as $itemId => $qtySupplied) {
                 $reqItem = RequisitionItem::find($itemId);
                 if ($reqItem && $reqItem->requisition_id === $requisition->id) {
                     $qty = (int)$qtySupplied;

@@ -69,6 +69,26 @@ class ShortLeaveController extends Controller
             'note'        => 'nullable|string',
         ]);
 
+        $newOut = \Carbon\Carbon::parse($request->out_time)->format('H:i:s');
+        $newIn = $request->in_time ? \Carbon\Carbon::parse($request->in_time)->format('H:i:s') : null;
+
+        $existingLeaves = ShortLeave::where('employee_id', $request->employee_id)
+            ->where('date', $request->date)
+            ->whereIn('status', ['pending', 'approved'])
+            ->get();
+
+        foreach ($existingLeaves as $exist) {
+            $extOut = \Carbon\Carbon::parse($exist->out_time)->format('H:i:s');
+            $extIn = $exist->in_time ? \Carbon\Carbon::parse($exist->in_time)->format('H:i:s') : null;
+
+            $newInVal = $newIn ?? '23:59:59';
+            $extInVal = $extIn ?? '23:59:59';
+
+            if ($newOut < $extInVal && $newInVal > $extOut) {
+                return back()->withInput()->withErrors(['out_time' => 'The employee already has an active short leave on this date that overlaps with the requested time window.']);
+            }
+        }
+
         $data['duration_minutes'] = ShortLeave::calcDuration($data['out_time'], $data['in_time'] ?? null);
         $data['entered_by']       = Auth::id();
         $data['status']           = 'pending';

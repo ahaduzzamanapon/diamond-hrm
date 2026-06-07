@@ -44,7 +44,19 @@
           {{ ucfirst(str_replace('_',' ',$att->status)) }}
         </span>
       </td>
-      <td style="border:1px solid #ddd;padding:5px 9px;font-size:11px;color:#64748b">{{ $att->note }}</td>
+      @php
+        $key = $att->employee_id . '_' . $att->date->format('Y-m-d');
+        $daySL = isset($shortLeaves) && $shortLeaves->has($key) ? $shortLeaves->get($key) : collect();
+        $slTexts = [];
+        foreach ($daySL as $sl) {
+            $formattedOut = \Carbon\Carbon::parse($sl->out_time)->format('h:i A');
+            $formattedIn  = $sl->in_time ? \Carbon\Carbon::parse($sl->in_time)->format('h:i A') : '—';
+            $slTexts[]    = "Short Leave: {$formattedOut}-{$formattedIn} (" . $sl->duration_formatted . ")";
+        }
+        $slNote = !empty($slTexts) ? implode('; ', $slTexts) : '';
+        $displayNote = trim(($att->note ? $att->note . '. ' : '') . $slNote);
+      @endphp
+      <td style="border:1px solid #ddd;padding:5px 9px;font-size:11px;color:#64748b">{{ $displayNote ?: '—' }}</td>
     </tr>
     @empty
     <tr><td colspan="12" style="text-align:center;padding:30px;color:#94a3b8">No records found for the selected criteria</td></tr>

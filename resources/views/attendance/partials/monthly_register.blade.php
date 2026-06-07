@@ -8,6 +8,7 @@
 @php
   // BUG-014 FIX: sortByDesc id ensures latest (most complete) record wins when duplicates exist
   $empAtt = $allAtt->get($emp->id,collect())->sortByDesc('id')->keyBy(fn($a)=>$a->date->format('Y-m-d'));
+  $empShortLeaves = isset($shortLeaves) ? $shortLeaves->where('employee_id', $emp->id)->groupBy(fn($sl) => $sl->date->format('Y-m-d')) : collect();
 @endphp
 <div style="margin-bottom:18px;page-break-inside:avoid">
   <div style="background:#0a0a0a;color:#fff;padding:7px 10px;font-weight:700;display:flex;justify-content:space-between;font-size:12px">
@@ -115,7 +116,18 @@
           </td>
           <td style="border:1px solid #e5e7eb;padding:4px 7px;text-align:center;font-size:10px">{!! $diffOut !!}</td>
           <td style="border:1px solid #e5e7eb;padding:4px 7px;text-align:center;font-weight:700;color:{{ $statusColor }};font-size:10px">{{ $status }}</td>
-          <td style="border:1px solid #e5e7eb;padding:4px 7px;font-size:9.5px;color:#94a3b8">{{ $att?->note ?? ($holiday ?? '') }}</td>
+          @php
+            $daySL = $empShortLeaves->get($key, collect());
+            $slTexts = [];
+            foreach ($daySL as $sl) {
+                $formattedOut = \Carbon\Carbon::parse($sl->out_time)->format('h:i A');
+                $formattedIn  = $sl->in_time ? \Carbon\Carbon::parse($sl->in_time)->format('h:i A') : '—';
+                $slTexts[]    = "Short Leave: {$formattedOut}-{$formattedIn} (" . $sl->duration_formatted . ")";
+            }
+            $slNote = !empty($slTexts) ? implode('; ', $slTexts) : '';
+            $remarks = trim(($att?->note ? $att->note . '. ' : '') . ($holiday ?? '') . ($slNote ? ($holiday || $att?->note ? '. ' : '') . $slNote : ''));
+          @endphp
+          <td style="border:1px solid #e5e7eb;padding:4px 7px;font-size:9.5px;color:#94a3b8">{{ $remarks ?: '—' }}</td>
         </tr>
       @endfor
     </tbody>

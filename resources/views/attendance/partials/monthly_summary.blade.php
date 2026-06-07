@@ -11,6 +11,9 @@
       ->where('status','pending')
       ->selectRaw('employee_id, COUNT(*) as cnt')->groupBy('employee_id')
       ->pluck('cnt','employee_id');
+
+  // Group monthly short leaves by employee
+  $empShortLeaves = isset($shortLeaves) ? $shortLeaves->groupBy('employee_id') : collect();
 @endphp
 <div style="margin-bottom:10px;font-family:'Times New Roman',serif;text-align:center">
   <div style="font-weight:700;font-size:15px;letter-spacing:1px">ATTENDANTS SUMMARY STATEMENT</div>
@@ -30,6 +33,7 @@
       <th rowspan="2" style="background:#0a0a0a;color:#fff;border:1px solid #555;padding:5px 7px">Late</th>
       <th rowspan="2" style="background:#0a0a0a;color:#fff;border:1px solid #555;padding:5px 7px">Lat Abst</th>
       <th rowspan="2" style="background:#0a0a0a;color:#fff;border:1px solid #555;padding:5px 7px">Ov. Late</th>
+      <th rowspan="2" style="background:#0a0a0a;color:#fff;border:1px solid #555;padding:5px 7px">Sh. Leave</th>
       <th rowspan="2" style="background:#0a0a0a;color:#fff;border:1px solid #555;padding:5px 7px">Pnd.Lev</th>
       <th rowspan="2" style="background:#0a0a0a;color:#fff;border:1px solid #555;padding:5px 7px">Net Paid</th>
       <th rowspan="2" style="background:#0a0a0a;color:#fff;border:1px solid #555;padding:5px 7px;min-width:60px">Remarks</th>
@@ -72,6 +76,18 @@
       $pndLev  = $pendingLeaves->get($emp->id, 0);
       $dutyDays= $daysInMonth - $we - $totalHolidays;
       $netPaid = max(0, $present);
+
+      // Compute short leaves for this employee
+      $slCount = 0;
+      $slFormatted = '—';
+      if ($empShortLeaves->has($emp->id)) {
+          $sls = $empShortLeaves->get($emp->id);
+          $slCount = $sls->count();
+          $slMins = $sls->sum('duration_minutes');
+          $slHours = intdiv($slMins, 60);
+          $slRemMins = $slMins % 60;
+          $slFormatted = $slCount > 0 ? "{$slCount} (" . ($slHours > 0 ? "{$slHours}h " : "") . "{$slRemMins}m)" : '—';
+      }
     @endphp
     <tr style="background:{{ $i%2==0?'#fff':'#f9fafb' }}">
       <td style="border:1px solid #ddd;padding:4px 6px;text-align:center">{{ $i+1 }}</td>
@@ -88,6 +104,7 @@
       <td style="border:1px solid #ddd;padding:4px 6px;text-align:center;color:#f59e0b">{{ $late }}</td>
       <td style="border:1px solid #ddd;padding:4px 6px;text-align:center">{{ $latAbst }}</td>
       <td style="border:1px solid #ddd;padding:4px 6px;text-align:center">{{ $ovLate }}</td>
+      <td style="border:1px solid #ddd;padding:4px 6px;text-align:center;color:#b45309;font-weight:600">{{ $slFormatted }}</td>
       <td style="border:1px solid #ddd;padding:4px 6px;text-align:center;color:{{ $pndLev?'#f59e0b':'#94a3b8' }}">{{ $pndLev }}</td>
       <td style="border:1px solid #ddd;padding:4px 6px;text-align:center;font-weight:700">{{ $netPaid }}</td>
       <td style="border:1px solid #ddd;padding:4px 6px"></td>

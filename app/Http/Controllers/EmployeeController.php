@@ -218,6 +218,11 @@ class EmployeeController extends Controller
 
             $employee->update($data);
 
+            // Also sync the linked user's branch_id if branch_id is updated
+            if ($employee->user && isset($data['branch_id'])) {
+                $employee->user->update(['branch_id' => $data['branch_id']]);
+            }
+
             // Update role
             if ($employee->user && $request->filled('role')) {
                 $employee->user->syncRoles([$request->role]);

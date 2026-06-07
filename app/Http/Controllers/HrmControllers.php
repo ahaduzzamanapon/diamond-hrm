@@ -89,8 +89,17 @@ class HolidayController extends Controller
     }
     public function store(Request $r)
     {
-        // BUG-117 FIX: prevent duplicate holiday dates
-        $r->validate(['name'=>'required','date'=>'required|date|unique:holidays,date']);
+        // Scope holiday uniqueness to date and branch
+        $r->validate([
+            'name' => 'required',
+            'date' => [
+                'required',
+                'date',
+                \Illuminate\Validation\Rule::unique('holidays')->where(function ($query) use ($r) {
+                    return $query->where('branch_id', $r->branch_id);
+                })
+            ]
+        ]);
         Holiday::create($r->only('name','date','type','description','branch_id'));
         return back()->with('success','Holiday added!');
     }

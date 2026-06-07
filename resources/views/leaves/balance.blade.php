@@ -6,6 +6,15 @@
 <div class="page-header">
   <div><h1 class="page-title">Leave Balance</h1><p class="page-subtitle">{{ $employee->name }} — {{ $year }}</p></div>
   <form method="GET" class="flex gap-8">
+    @if(isset($employees) && !$employees->isEmpty())
+      <select name="employee_id" class="form-control" onchange="this.form.submit()">
+        @foreach($employees as $emp)
+          <option value="{{ $emp->id }}" {{ $employee->id == $emp->id ? 'selected' : '' }}>
+            {{ $emp->name }} ({{ $emp->card_no }})
+          </option>
+        @endforeach
+      </select>
+    @endif
     <select name="year" class="form-control" onchange="this.form.submit()">
       @for($y = now()->year; $y >= now()->year-3; $y--)
         <option value="{{ $y }}" {{ $year==$y?'selected':'' }}>{{ $y }}</option>
