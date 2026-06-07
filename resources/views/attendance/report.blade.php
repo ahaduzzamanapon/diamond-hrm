@@ -167,21 +167,19 @@
 
 </div>
 
-{{-- ════ REPORT MODAL — FULL SCREEN ══════════════════════════════════════════ --}}
-<div class="modal-overlay" id="reportModal" style="z-index:500;padding:0">
-  <div class="modal" style="width:100vw;height:100vh;max-width:100vw;max-height:100vh;border-radius:0;display:flex;flex-direction:column;margin:0">
-    <div class="modal-header" style="flex-shrink:0;border-radius:0;padding:14px 24px">
-      <span class="modal-title" id="reportTitle"><i class="bi bi-table"></i> Report</span>
-      <div class="flex gap-8">
-        <button onclick="printReport()" class="btn btn-sm btn-secondary"><i class="bi bi-printer"></i> Print / PDF</button>
-        <button class="modal-close" onclick="document.getElementById('reportModal').classList.remove('open')">&times;</button>
-      </div>
+{{-- ════ REPORT PANEL — TRUE FULL SCREEN ══════════════════════════════════ --}}
+<div id="reportModal" style="display:none;position:fixed;inset:0;z-index:9999;background:#fff;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid #e2e8f0;background:#fff;flex-shrink:0;box-shadow:0 1px 8px rgba(0,0,0,0.06)">
+    <span style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px" id="reportTitle"><i class="bi bi-table"></i> Report</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button onclick="printReport()" class="btn btn-sm btn-secondary"><i class="bi bi-printer"></i> Print / PDF</button>
+      <button onclick="closeReportPanel()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#94a3b8;line-height:1;padding:4px 8px;border-radius:6px" title="Close">&times;</button>
     </div>
-    <div style="overflow:auto;flex:1;padding:24px" id="reportContent">
-      <div style="text-align:center;padding:40px;color:var(--text-muted)">
-        <i class="bi bi-arrow-clockwise" style="font-size:32px;animation:spin 1s linear infinite"></i>
-        <p style="margin-top:10px">Loading report...</p>
-      </div>
+  </div>
+  <div style="overflow:auto;flex:1;padding:24px" id="reportContent">
+    <div style="text-align:center;padding:60px;color:#94a3b8">
+      <i class="bi bi-arrow-clockwise" style="font-size:32px;animation:spin 1s linear infinite;display:inline-block"></i>
+      <p style="margin-top:12px;font-size:14px">Loading report...</p>
     </div>
   </div>
 </div>
@@ -274,8 +272,9 @@ function loadReport(type) {
   const mode = document.querySelector(`[onclick="loadReport('${type}')"]`)?.dataset.mode || 'date';
   const filters = { ...getFilters(mode), type };
 
-  // Open modal + show loader
-  document.getElementById('reportModal').classList.add('open');
+  // Open full-screen panel
+  const panel = document.getElementById('reportModal');
+  panel.style.display = 'flex';
   const titles = {
     'all': 'All Attendance', 'present': 'Present Report', 'absent': 'Absent Report',
     'late': 'Late Report', 'early_out': 'Early Out Report', 'leave': 'Leave Report',
@@ -408,5 +407,13 @@ function processAttendance(mode) {
     resDiv.innerHTML = '<i class="bi bi-x-circle-fill"></i> Server error. Please try again.';
   });
 }
+// ── Close full-screen report panel ────────────────────────────────────────
+function closeReportPanel() {
+  document.getElementById('reportModal').style.display = 'none';
+}
+// Close on Escape key
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeReportPanel();
+});
 </script>
 @endpush
