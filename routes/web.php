@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AdmsController;
 use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\ShortLeaveController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\BiometricController;
 use App\Http\Controllers\BranchController;
@@ -110,6 +111,13 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/manual',        [AttendanceController::class, 'manual'])->name('manual.store');
         Route::get('/extra-present',  [AttendanceController::class, 'extraPresent'])->name('extra');
         Route::post('/extra-present/{extraRequest}/approve', [AttendanceController::class, 'approveExtra'])->name('extra.approve');
+        // ── Short Leave ──────────────────────────────────────────────────────
+        Route::get('/short-leave',              [ShortLeaveController::class, 'index'])->name('short-leave.index');
+        Route::get('/short-leave/create',       [ShortLeaveController::class, 'create'])->name('short-leave.create');
+        Route::post('/short-leave',             [ShortLeaveController::class, 'store'])->name('short-leave.store');
+        Route::post('/short-leave/{shortLeave}/approve', [ShortLeaveController::class, 'approve'])->name('short-leave.approve');
+        Route::post('/short-leave/{shortLeave}/reject',  [ShortLeaveController::class, 'reject'])->name('short-leave.reject');
+        Route::get('/short-leave/report',       [ShortLeaveController::class, 'report'])->name('short-leave.report');
     });
 
     // ── Leaves ──────────────────────────────────────────────────────────────

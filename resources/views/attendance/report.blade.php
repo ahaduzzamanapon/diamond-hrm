@@ -167,17 +167,17 @@
 
 </div>
 
-{{-- ════ REPORT MODAL ═══════════════════════════════════════════════════════ --}}
-<div class="modal-overlay" id="reportModal" style="z-index:500">
-  <div class="modal" style="max-width:95vw;width:1100px;max-height:90vh;display:flex;flex-direction:column">
-    <div class="modal-header" style="flex-shrink:0">
+{{-- ════ REPORT MODAL — FULL SCREEN ══════════════════════════════════════════ --}}
+<div class="modal-overlay" id="reportModal" style="z-index:500;padding:0">
+  <div class="modal" style="width:100vw;height:100vh;max-width:100vw;max-height:100vh;border-radius:0;display:flex;flex-direction:column;margin:0">
+    <div class="modal-header" style="flex-shrink:0;border-radius:0;padding:14px 24px">
       <span class="modal-title" id="reportTitle"><i class="bi bi-table"></i> Report</span>
       <div class="flex gap-8">
         <button onclick="printReport()" class="btn btn-sm btn-secondary"><i class="bi bi-printer"></i> Print / PDF</button>
         <button class="modal-close" onclick="document.getElementById('reportModal').classList.remove('open')">&times;</button>
       </div>
     </div>
-    <div style="overflow:auto;flex:1;padding:16px" id="reportContent">
+    <div style="overflow:auto;flex:1;padding:24px" id="reportContent">
       <div style="text-align:center;padding:40px;color:var(--text-muted)">
         <i class="bi bi-arrow-clockwise" style="font-size:32px;animation:spin 1s linear infinite"></i>
         <p style="margin-top:10px">Loading report...</p>

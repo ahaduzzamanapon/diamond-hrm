@@ -52,7 +52,6 @@ body {
   background: var(--clr-bg);
   color: var(--text-primary);
   min-height: 100vh;
-  overflow-x: hidden;
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -220,6 +219,7 @@ body {
   margin-left: var(--sidebar-w); margin-top: 60px;
   padding: 22px; min-height: calc(100vh - 60px);
   transition: margin-left 0.2s cubic-bezier(0.4,0,0.2,1);
+  overflow-x: auto;
 }
 .main-content.shifted { margin-left: var(--sidebar-collapsed); }
 

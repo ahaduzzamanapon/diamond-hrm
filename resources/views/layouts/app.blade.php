@@ -131,6 +131,12 @@
           <span class="nav-icon"><i class="bi bi-pencil-square"></i></span>
           <span class="nav-label">Manual Entry</span>
         </a>
+        <a href="{{ route('attendance.short-leave.index') }}" class="nav-item {{ request()->routeIs('attendance.short-leave.*') ? 'active' : '' }}">
+          <span class="nav-icon"><i class="bi bi-clock-history"></i></span>
+          <span class="nav-label">Short Leave</span>
+          @php $pendingShortLeaves = \App\Models\ShortLeave::where('status','pending')->count(); @endphp
+          @if($pendingShortLeaves > 0)<span class="nav-badge">{{ $pendingShortLeaves }}</span>@endif
+        </a>
         @endcan
         <a href="{{ route('attendance.extra') }}" class="nav-item {{ request()->routeIs('attendance.extra') ? 'active' : '' }}">
           <span class="nav-icon"><i class="bi bi-star-fill"></i></span>
