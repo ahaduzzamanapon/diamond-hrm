@@ -67,6 +67,7 @@ class ShortLeaveController extends Controller
             'in_time'     => 'nullable',
             'reason'      => 'required|string|max:255',
             'note'        => 'nullable|string',
+            'remarks'     => 'nullable|string',
         ]);
 
         $newOut = \Carbon\Carbon::parse($request->out_time)->format('H:i:s');

@@ -110,6 +110,7 @@
               <th>Return Time</th>
               <th>Duration</th>
               <th>Reason</th>
+              <th>Remarks</th>
               <th>Status</th>
               <th>Approved By</th>
             </tr>
@@ -137,6 +138,7 @@
                 @endif
               </td>
               <td style="max-width:200px">{{ $sl->reason }}</td>
+              <td style="max-width:200px">{{ $sl->remarks ?? '—' }}</td>
               <td>{!! $sl->status_badge !!}</td>
               <td style="font-size:12px">{{ $sl->approvedBy?->name ?? '—' }}</td>
             </tr>
@@ -148,7 +150,7 @@
               <td style="color:#b45309;font-size:14px">
                 {{ $h > 0 ? "{$h}h {$m}m" : "{$m}m" }}
               </td>
-              <td colspan="3"></td>
+              <td colspan="4"></td>
             </tr>
           </tfoot>
         </table>

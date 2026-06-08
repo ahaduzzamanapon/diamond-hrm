@@ -63,6 +63,11 @@
         <textarea name="note" class="form-control" rows="2" placeholder="Additional details...">{{ old('note') }}</textarea>
       </div>
 
+      <div class="form-group">
+        <label class="form-label">Remarks <small class="text-muted">(optional)</small></label>
+        <textarea name="remarks" class="form-control" rows="2" placeholder="Enter remarks...">{{ old('remarks') }}</textarea>
+      </div>
+
       <div class="flex gap-8 mt-16">
         <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Save Entry</button>
         <a href="{{ route('attendance.short-leave.index') }}" class="btn btn-secondary">Cancel</a>

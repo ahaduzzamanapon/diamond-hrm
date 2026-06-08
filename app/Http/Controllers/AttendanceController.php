@@ -318,6 +318,92 @@ class AttendanceController extends Controller
             return response()->json(['html' => $html]);
         }
 
+        if ($type === 'movement') {
+            $logs = \App\Models\BiometricLog::with(['employee.branch', 'device.branch'])
+                ->whereIn('employee_id', $employees->pluck('id'))
+                ->whereBetween('punch_time', [$date1 . ' 00:00:00', $date2 . ' 23:59:59'])
+                ->orderBy('employee_id')
+                ->orderBy('punch_time')
+                ->get();
+
+            $groupedLogs = $logs->groupBy([
+                'employee_id',
+                fn($log) => $log->punch_time->format('Y-m-d')
+            ]);
+
+            $movements = [];
+
+            foreach ($employees as $emp) {
+                $empLogsByDate = $groupedLogs->get($emp->id);
+                if (!$empLogsByDate) continue;
+
+                foreach ($empLogsByDate as $dateStr => $dayLogs) {
+                    $dayLogs = $dayLogs->sortBy('punch_time')->values();
+                    $segments = [];
+                    $currentSegment = null;
+
+                    foreach ($dayLogs as $log) {
+                        $deviceBranch = $log->device?->branch;
+                        $branchId = $deviceBranch?->id ?? $emp->branch_id;
+                        $branchName = $deviceBranch?->name ?? $emp->branch?->name ?? 'Unknown';
+
+                        if ($currentSegment === null) {
+                            $currentSegment = [
+                                'branch_id' => $branchId,
+                                'branch_name' => $branchName,
+                                'logs' => [$log]
+                            ];
+                        } elseif ($currentSegment['branch_id'] === $branchId) {
+                            $currentSegment['logs'][] = $log;
+                        } else {
+                            $segments[] = $currentSegment;
+                            $currentSegment = [
+                                'branch_id' => $branchId,
+                                'branch_name' => $branchName,
+                                'logs' => [$log]
+                            ];
+                        }
+                    }
+                    if ($currentSegment !== null) {
+                        $segments[] = $currentSegment;
+                    }
+
+                    if (count($segments) > 1) {
+                        for ($i = 0; $i < count($segments) - 1; $i++) {
+                            $fromSeg = $segments[$i];
+                            $toSeg = $segments[$i + 1];
+
+                            $fromLogs = $fromSeg['logs'];
+                            $departLog = end($fromLogs);
+                            $arriveLog = $toSeg['logs'][0];
+
+                            $departTime = $departLog->punch_time;
+                            $arriveTime = $arriveLog->punch_time;
+
+                            $durationMinutes = $arriveTime->diffInMinutes($departTime);
+                            $durationHours = intdiv($durationMinutes, 60);
+                            $remMinutes = $durationMinutes % 60;
+                            $durationStr = ($durationHours > 0 ? "{$durationHours}h " : "") . "{$remMinutes}m";
+
+                            $movements[] = [
+                                'employee' => $emp,
+                                'date' => \Carbon\Carbon::parse($dateStr),
+                                'from_branch' => $fromSeg['branch_name'],
+                                'departure_time' => $departTime,
+                                'to_branch' => $toSeg['branch_name'],
+                                'arrival_time' => $arriveTime,
+                                'duration' => $durationStr,
+                                'depart_punch_type' => $departLog->punch_type,
+                                'arrive_punch_type' => $arriveLog->punch_type,
+                            ];
+                        }
+                    }
+                }
+            }
+
+            $html = view('attendance.partials.movement', compact('movements', 'date1', 'date2'))->render();
+            return response()->json(['html' => $html]);
+        }
 
         // Date / Range modes
         $attQuery = Attendance::with(['employee.branch','employee.department','employee.designation'])

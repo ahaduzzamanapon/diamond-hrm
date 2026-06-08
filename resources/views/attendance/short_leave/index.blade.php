@@ -75,6 +75,7 @@
           <th>In Time</th>
           <th>Duration</th>
           <th>Reason</th>
+          <th>Remarks</th>
           <th>Status</th>
           <th>Entered By</th>
           <th>Actions</th>
@@ -100,6 +101,7 @@
             @endif
           </td>
           <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ $sl->reason }}">{{ $sl->reason }}</td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ $sl->remarks }}">{{ $sl->remarks ?? '—' }}</td>
           <td>{!! $sl->status_badge !!}</td>
           <td style="font-size:12px">{{ $sl->enteredBy?->name ?? '—' }}</td>
           <td>
@@ -120,7 +122,7 @@
           </td>
         </tr>
         @empty
-        <tr><td colspan="11"><div class="empty-state"><div class="empty-icon">🕐</div><h3>No short leave records found</h3></div></td></tr>
+        <tr><td colspan="12"><div class="empty-state"><div class="empty-icon">🕐</div><h3>No short leave records found</h3></div></td></tr>
         @endforelse
       </tbody>
     </table>

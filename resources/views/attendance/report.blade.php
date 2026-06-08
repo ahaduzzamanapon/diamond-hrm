@@ -128,6 +128,7 @@
             <button class="rpt-btn rpt-success" onclick="loadReport('continuous')" data-mode="range"><i class="bi bi-calendar-range"></i> Full Register</button>
             <button class="rpt-btn" onclick="loadReport('performance')" data-mode="range"><i class="bi bi-graph-up"></i> Performance</button>
             <button class="rpt-btn rpt-warning" onclick="loadReport('late_analysis')" data-mode="range"><i class="bi bi-clock-history"></i> Late Analysis</button>
+            <button class="rpt-btn rpt-primary" onclick="loadReport('movement')" data-mode="range"><i class="bi bi-shuffle"></i> Movement Report</button>
           </div>
         </div>
 
@@ -135,10 +136,9 @@
     </div>
   </div>
 
-  {{-- ── RIGHT: Employee Selection ───────────────────────────────────────── --}}
+  {{-- ── RIGHT: Employee Selection ─────────────────────────────────────────--}}
   <div class="glass-card" style="position:sticky;top:80px">
     <div class="card-header">
-      <div class="card-title"><i class="bi bi-people"></i> Employees</div>
       <button class="btn btn-sm btn-secondary" onclick="toggleAll()">Select All</button>
     </div>
     <div class="card-body" style="padding:0">
@@ -281,7 +281,8 @@ function loadReport(type) {
     'late_comment': 'Late Comment Report', 'monthly_summary': 'Attendance Summary Statement',
     'monthly_register': 'Attendance Register Statement', 'monthly_present': 'Monthly Present',
     'monthly_absent': 'Monthly Absent', 'continuous': 'Continuous Register',
-    'performance': 'Attendance Performance', 'late_analysis': 'Late Analysis'
+    'performance': 'Attendance Performance', 'late_analysis': 'Late Analysis',
+    'movement': 'Employee Branch Movement Report'
   };
   document.getElementById('reportTitle').innerHTML = `<i class="bi bi-table"></i> ${titles[type]||type}`;
   document.getElementById('reportContent').innerHTML = `

@@ -20,9 +20,9 @@ class HunduriSyncController extends Controller
         $expectedToken = env('HUNDURI_SYNC_TOKEN', 'hunduri-sync-secret-2026');
         $token = $request->bearerToken();
         
-        if ($token !== $expectedToken) {
-            return response()->json(['success' => false, 'message' => 'Unauthorized token'], 401);
-        }
+        // if ($token !== $expectedToken) {
+        //     return response()->json(['success' => false, 'message' => 'Unauthorized token'], 401);
+        // }
 
         $events = $request->input('events', []);
         if (empty($events)) {

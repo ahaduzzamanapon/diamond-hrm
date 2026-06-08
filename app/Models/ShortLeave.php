@@ -9,7 +9,7 @@ class ShortLeave extends Model
 {
     protected $fillable = [
         'employee_id', 'date', 'out_time', 'in_time',
-        'duration_minutes', 'reason', 'note',
+        'duration_minutes', 'reason', 'note', 'remarks',
         'status', 'entered_by', 'approved_by', 'approved_at',
     ];
 

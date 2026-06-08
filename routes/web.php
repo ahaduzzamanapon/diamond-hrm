@@ -28,6 +28,7 @@ Route::prefix('adms')->name('adms.')->group(function () {
 
 // ── Public: Hunduri Python Webhook API ────────────────────────────
 Route::post('api/biometric/hunduri-sync', [\App\Http\Controllers\Api\HunduriSyncController::class, 'sync']);
+Route::get('api/biometric/hunduri-sync', [\App\Http\Controllers\Api\HunduriSyncController::class, 'sync']);
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 Route::get('/',      [LoginController::class, 'showLogin'])->name('login');
