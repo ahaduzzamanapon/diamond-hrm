@@ -15,8 +15,9 @@ use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithValidation;
 use Maatwebsite\Excel\Concerns\SkipsOnFailure;
 use Maatwebsite\Excel\Concerns\SkipsFailures;
+use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 
-class EmployeesImport implements ToCollection, WithHeadingRow, SkipsOnFailure
+class EmployeesImport implements ToCollection, WithHeadingRow, SkipsOnFailure, WithMultipleSheets
 {
     use SkipsFailures;
 
@@ -27,12 +28,53 @@ class EmployeesImport implements ToCollection, WithHeadingRow, SkipsOnFailure
         foreach ($rows as $index => $row) {
             try {
                 $branch = Branch::where('name', $row['branch'])->orWhere('code', $row['branch'])->first();
-                $dept   = Department::where('name', $row['department'])->first();
-                $desig  = Designation::where('name', $row['designation'])->first();
-                $shift  = Shift::where('name', $row['shift'] ?? 'General')->first();
+                if (!$branch) {
+                    $this->errors[] = "Row " . ($index + 2) . ": Branch '" . ($row['branch'] ?? '') . "' not found – skipped.";
+                    continue;
+                }
 
-                if (!$branch || !$dept || !$desig) {
-                    $this->errors[] = "Row " . ($index + 2) . ": Branch/Department/Designation not found – skipped.";
+                // Smartly find or create department under the branch
+                $deptName = trim($row['department'] ?? '');
+                $dept = Department::where('branch_id', $branch->id)
+                    ->where(function($q) use ($deptName) {
+                        $q->where('name', $deptName);
+                        if (strtolower($deptName) === 'hr') {
+                            $q->orWhere('name', 'Human Resources');
+                        } elseif (strtolower($deptName) === 'human resources') {
+                            $q->orWhere('name', 'HR');
+                        }
+                    })->first();
+
+                if (!$dept && !empty($deptName)) {
+                    $dept = Department::create([
+                        'branch_id' => $branch->id,
+                        'name'      => $deptName,
+                        'is_active' => true,
+                    ]);
+                }
+
+                // Smartly find or create designation under the department
+                $desigName = trim($row['designation'] ?? '');
+                $desig = null;
+                if ($dept) {
+                    $desig = Designation::where('department_id', $dept->id)
+                        ->where('name', $desigName)
+                        ->first();
+
+                    if (!$desig && !empty($desigName)) {
+                        $desig = Designation::create([
+                            'department_id' => $dept->id,
+                            'name'          => $desigName,
+                            'is_active'     => true,
+                        ]);
+                    }
+                }
+
+                $shiftName = trim($row['shift'] ?? '');
+                $shift = Shift::where('name', $shiftName)->first() ?? Shift::first();
+
+                if (!$dept || !$desig) {
+                    $this->errors[] = "Row " . ($index + 2) . ": Department/Designation could not be found or created – skipped.";
                     continue;
                 }
 
@@ -75,6 +117,13 @@ class EmployeesImport implements ToCollection, WithHeadingRow, SkipsOnFailure
                 $this->errors[] = "Row " . ($index + 2) . ": " . $e->getMessage();
             }
         }
+    }
+
+    public function sheets(): array
+    {
+        return [
+            0 => $this,
+        ];
     }
 
     private function parseDate(mixed $value): ?string

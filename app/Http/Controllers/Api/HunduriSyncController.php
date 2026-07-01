@@ -60,12 +60,27 @@ class HunduriSyncController extends Controller
             }
             
             // Check if log already exists
-            $exists = BiometricLog::where('device_serial', $device->serial_number)
+            $log = BiometricLog::where('device_serial', $device->serial_number)
                 ->where('biometric_user_id', $ev['personID'])
                 ->where('punch_time', $punchDateTime)
-                ->exists();
+                ->first();
                 
-            if (!$exists) {
+            if ($log) {
+                // If it exists but wasn't processed or linked to an employee yet
+                if (empty($log->employee_id) || !$log->processed) {
+                    $employee = Employee::where('biometric_user_id', $ev['personID'])
+                                        ->orWhere('employee_id', $ev['personID'])
+                                        ->first();
+                    if ($employee) {
+                        $this->processAttendanceForLog($log, $employee, $punchDateTime);
+                        $log->update([
+                            'employee_id' => $employee->id,
+                            'processed'   => true
+                        ]);
+                        $savedLogs++;
+                    }
+                }
+            } else {
                 $employee = Employee::where('biometric_user_id', $ev['personID'])
                                     ->orWhere('employee_id', $ev['personID'])
                                     ->first();

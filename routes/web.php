@@ -154,6 +154,7 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/report', [\App\Http\Controllers\PayrollController::class, 'index'])->name('report');
         Route::post('/process', [\App\Http\Controllers\PayrollController::class, 'process'])->name('process');
         Route::get('/modal', [\App\Http\Controllers\PayrollController::class, 'reportModal'])->name('modal');
+        Route::get('/payslip/{payroll}', [\App\Http\Controllers\PayrollController::class, 'payslip'])->name('payslip');
         Route::resource('advance-salary', \App\Http\Controllers\AdvanceSalaryController::class)->only(['index', 'store', 'show']);
         // BUG-104 FIX: approve/reject routes for advance salary
         Route::post('advance-salary/{advanceSalary}/approve', [\App\Http\Controllers\AdvanceSalaryController::class, 'approve'])->name('advance-salary.approve');

@@ -226,4 +226,12 @@ class PayrollController extends Controller
 
         return view('payroll.modals.' . $viewName, compact('payrolls', 'month'));
     }
+
+    public function payslip(Payroll $payroll)
+    {
+        $payroll->load(['employee.designation', 'employee.department']);
+        $payrolls = collect([$payroll]);
+        $month = $payroll->salary_month;
+        return view('payroll.modals.payslip', compact('payrolls', 'month'));
+    }
 }

@@ -458,6 +458,90 @@ class AttendanceController extends Controller
         }
         $empIdsList = $employees->pluck('id');
 
+        // ── Auto-resolve and process unmapped/unprocessed biometric logs first ──
+        // 1. Link any unmapped logs to employees if they are now created
+        $unmappedLogs = BiometricLog::whereNull('employee_id')->get();
+        if ($unmappedLogs->isNotEmpty()) {
+            $bioUserIds = $unmappedLogs->pluck('biometric_user_id')->unique()->toArray();
+            $mappedEmployees = Employee::whereIn('biometric_user_id', $bioUserIds)
+                ->orWhereIn('employee_id', $bioUserIds)
+                ->get();
+
+            foreach ($unmappedLogs as $log) {
+                $employee = $mappedEmployees->first(function ($emp) use ($log) {
+                    return $emp->biometric_user_id === $log->biometric_user_id || $emp->employee_id === $log->biometric_user_id;
+                });
+                if ($employee) {
+                    $log->update(['employee_id' => $employee->id]);
+                }
+            }
+        }
+
+        // 2. Fetch all unprocessed logs in the selected date range for the selected employees and process them
+        $unprocessedLogs = BiometricLog::whereIn('employee_id', $empIdsList)
+            ->whereBetween('punch_time', [$date1 . ' 00:00:00', $date2 . ' 23:59:59'])
+            ->where('processed', false)
+            ->orderBy('punch_time', 'asc')
+            ->get();
+
+        foreach ($unprocessedLogs as $log) {
+            $employee = $employees->firstWhere('id', $log->employee_id);
+            if ($employee) {
+                $punchDateTime = Carbon::parse($log->punch_time);
+                $date = $punchDateTime->format('Y-m-d');
+                $shift = $employee->shift;
+                $existingAtt = Attendance::where('employee_id', $employee->id)->where('date', $date)->first();
+
+                $deviceSerial = $log->device_serial;
+                $branchId = $employee->branch_id;
+
+                if (!$existingAtt) {
+                    $late = 0;
+                    $status = 'present';
+                    if ($shift) {
+                        $shiftStart = Carbon::parse($date . ' ' . $shift->start_time);
+                        $late = max(0, $punchDateTime->diffInMinutes($shiftStart, false) * -1);
+                        if ($late > ($shift->grace_minutes ?? 0)) $status = 'late';
+                    }
+
+                    $holiday = Holiday::where('date', $date)->first();
+                    $isWeekend = Carbon::parse($date)->isWeekend();
+                    
+                    $dayName = strtolower($punchDateTime->format('l'));
+                    $isWorkingDay = $shift ? (bool)($shift->$dayName) : !$isWeekend;
+
+                    $finalSt = $holiday ? 'holiday' : (!$isWorkingDay ? 'weekend' : $status);
+
+                    Attendance::create([
+                        'employee_id'        => $employee->id,
+                        'date'               => $date,
+                        'in_time'            => $punchDateTime->format('H:i:s'),
+                        'in_device_serial'   => $deviceSerial,
+                        'in_branch_id'       => $branchId,
+                        'status'             => $finalSt,
+                        'late_minutes'       => $late,
+                        'source'             => 'biometric',
+                    ]);
+                } else {
+                    if (!$existingAtt->in_time) {
+                        $existingAtt->update([
+                            'in_time'          => $punchDateTime->format('H:i:s'),
+                            'in_device_serial' => $deviceSerial,
+                            'in_branch_id'     => $branchId,
+                        ]);
+                    } else {
+                        $existingAtt->update([
+                            'out_time'          => $punchDateTime->format('H:i:s'),
+                            'out_device_serial' => $deviceSerial,
+                            'out_branch_id'     => $branchId,
+                        ]);
+                    }
+                }
+
+                $log->update(['processed' => true]);
+            }
+        }
+
         $start   = Carbon::parse($date1);
         $end     = Carbon::parse($date2);
         $created = 0;

@@ -28,12 +28,77 @@ class SpecificEmployeesSeeder extends Seeder
 
         $employees = [
             [
+                'employee_id'      => '0378',
+                'first_name'       => 'Md. Rakib',
+                'last_name'        => 'Hossain',
+                'phone'            => null,
+                'contact_number'   => null,
+                'biometric_user_id'=> '0378',
+            ],
+            [
+                'employee_id'      => '0949',
+                'first_name'       => 'Gulap Chandra',
+                'last_name'        => 'Shil',
+                'phone'            => null,
+                'contact_number'   => null,
+                'biometric_user_id'=> '0949',
+            ],
+            [
+                'employee_id'      => '1089',
+                'first_name'       => 'Md.',
+                'last_name'        => 'Mostakim',
+                'phone'            => null,
+                'contact_number'   => null,
+                'biometric_user_id'=> '1089',
+            ],
+            [
+                'employee_id'      => '0643',
+                'first_name'       => 'Subrata',
+                'last_name'        => 'Karmoker',
+                'phone'            => null,
+                'contact_number'   => null,
+                'biometric_user_id'=> '0643',
+            ],
+            [
+                'employee_id'      => '0977',
+                'first_name'       => 'Md. Rubel',
+                'last_name'        => 'Mia',
+                'phone'            => null,
+                'contact_number'   => null,
+                'biometric_user_id'=> '0977',
+            ],
+            [
+                'employee_id'      => '0995',
+                'first_name'       => 'Jewel',
+                'last_name'        => 'Mia',
+                'phone'            => null,
+                'contact_number'   => null,
+                'biometric_user_id'=> '0995',
+            ],
+            [
+                'employee_id'      => '1081',
+                'first_name'       => 'Md. Alimur',
+                'last_name'        => 'Reza',
+                'phone'            => null,
+                'contact_number'   => null,
+                'biometric_user_id'=> '1081',
+            ],
+            [
+                'employee_id'      => '1005',
+                'first_name'       => 'Mohammad Arman',
+                'last_name'        => 'Rana',
+                'phone'            => null,
+                'contact_number'   => null,
+                'biometric_user_id'=> '1005',
+            ],
+            [
                 'employee_id'      => '0771',
-                'first_name'       => 'Arun Kumear',
+                'first_name'       => 'Arun Kumar',
                 'last_name'        => 'Das',
                 'phone'            => '01968779400',
                 'contact_number'   => '01968779400',
                 'biometric_user_id'=> '0771',
+                'old_names'        => ['Arun Kumear Das'],
             ],
             [
                 'employee_id'      => '0808',
@@ -45,24 +110,52 @@ class SpecificEmployeesSeeder extends Seeder
             ],
             [
                 'employee_id'      => '0632',
-                'first_name'       => 'Arafarul',
+                'first_name'       => 'Arafatul',
                 'last_name'        => 'Islam',
                 'phone'            => null,
                 'contact_number'   => null,
                 'biometric_user_id'=> '0632',
+                'old_names'        => ['Arafarul Islam'],
             ],
             [
-                'employee_id'      => '1073',
+                'employee_id'      => '0904',
+                'first_name'       => 'Azizul',
+                'last_name'        => 'Islam',
+                'phone'            => null,
+                'contact_number'   => null,
+                'biometric_user_id'=> '0904',
+            ],
+            [
+                'employee_id'      => '1013',
                 'first_name'       => 'Md. Abid',
                 'last_name'        => 'Hasan',
                 'phone'            => null,
                 'contact_number'   => null,
-                'biometric_user_id'=> '1073',
+                'biometric_user_id'=> '1013',
+                'old_employee_ids' => ['1073'],
             ],
         ];
 
         foreach ($employees as $data) {
-            // Create a login user account for each employee
+            // Find existing employee
+            $employee = null;
+            
+            // 1. Search by current employee_id
+            $employee = Employee::where('employee_id', $data['employee_id'])->first();
+            
+            // 2. Search by old employee ids if not found
+            if (! $employee && !empty($data['old_employee_ids'])) {
+                $employee = Employee::whereIn('employee_id', $data['old_employee_ids'])->first();
+            }
+            
+            // 3. Search by name or old names if not found
+            if (! $employee) {
+                $fullName = trim($data['first_name'] . ' ' . $data['last_name']);
+                $searchNames = array_merge([$fullName], $data['old_names'] ?? []);
+                $employee = Employee::whereIn('name', $searchNames)->first();
+            }
+
+            // Generate login email
             $email = strtolower(
                 str_replace([' ', '.'], ['', ''], $data['first_name']) .
                 '.' .
@@ -70,20 +163,43 @@ class SpecificEmployeesSeeder extends Seeder
                 '@hrm.com'
             );
 
-            $user = User::firstOrCreate(
-                ['email' => $email],
-                [
-                    'name'      => trim($data['first_name'] . ' ' . $data['last_name']),
-                    'password'  => Hash::make('password'),
-                    'branch_id' => $branch->id,
-                    'is_active' => true,
-                ]
-            );
-            $user->assignRole('staff');
+            if ($employee) {
+                // Update existing employee
+                $employee->update([
+                    'employee_id'       => $data['employee_id'],
+                    'first_name'        => $data['first_name'],
+                    'last_name'         => $data['last_name'],
+                    'phone'             => $data['phone'] ?? $employee->phone,
+                    'contact_number'    => $data['contact_number'] ?? $employee->contact_number,
+                    'biometric_user_id' => $data['biometric_user_id'],
+                ]);
+                
+                // If they have a user, update the user name and email
+                if ($employee->user) {
+                    $employee->user->update([
+                        'name'  => trim($data['first_name'] . ' ' . $data['last_name']),
+                        'email' => $email,
+                    ]);
+                }
+                
+                $this->command->info("✅ Updated: {$data['first_name']} {$data['last_name']} (ID: {$data['employee_id']})");
+            } else {
+                // Create new
+                $user = User::firstOrCreate(
+                    ['email' => $email],
+                    [
+                        'name'      => trim($data['first_name'] . ' ' . $data['last_name']),
+                        'password'  => Hash::make('password'),
+                        'branch_id' => $branch->id,
+                        'is_active' => true,
+                    ]
+                );
+                if (! $user->hasRole('staff')) {
+                    $user->assignRole('staff');
+                }
 
-            Employee::firstOrCreate(
-                ['employee_id' => $data['employee_id']],
-                [
+                Employee::create([
+                    'employee_id'      => $data['employee_id'],
                     'user_id'          => $user->id,
                     'branch_id'        => $branch->id,
                     'department_id'    => $department->id,
@@ -99,20 +215,12 @@ class SpecificEmployeesSeeder extends Seeder
                     'basic_salary'     => 0,
                     'biometric_user_id'=> $data['biometric_user_id'],
                     'status'           => 'active',
-                ]
-            );
+                ]);
 
-            $this->command->info("✅ Added: {$data['first_name']} {$data['last_name']} (ID: {$data['employee_id']})");
+                $this->command->info("✅ Created: {$data['first_name']} {$data['last_name']} (ID: {$data['employee_id']})");
+            }
         }
 
-        $this->command->table(
-            ['Employee ID', 'Name', 'Mobile', 'Login Email', 'Password'],
-            [
-                ['0771', 'Arun Kumear Das',  '01968779400', 'arunkumear.das@hrm.com',  'password'],
-                ['0808', 'Imran Hossain',    '01963333000', 'imran.hossain@hrm.com',   'password'],
-                ['0632', 'Arafarul Islam',   '-',           'arafarul.islam@hrm.com',  'password'],
-                ['1073', 'Md. Abid Hasan',   '-',           'mdabid.hasan@hrm.com',    'password'],
-            ]
-        );
+        $this->command->info("🎉 Employee import/update completed.");
     }
 }
