@@ -181,6 +181,16 @@
         $sc       = $statusColor[$att->status] ?? '#0a0a0a';
         $rowBg    = in_array($att->status,['weekend','holiday']) ? '#f8fafc' : ($i%2===0 ? '#fff' : '#fafafa');
 
+        $slKey = $emp->id . '_' . $att->date->format('Y-m-d');
+        $daySL = isset($shortLeaves) && $shortLeaves->has($slKey) ? $shortLeaves->get($slKey) : collect();
+        $slTexts = [];
+        foreach ($daySL as $sl) {
+            $formattedOut = \Carbon\Carbon::parse($sl->out_time)->format('h:i A');
+            $formattedIn  = $sl->in_time ? \Carbon\Carbon::parse($sl->in_time)->format('h:i A') : '—';
+            $slTexts[]    = "Short Leave: {$formattedOut}-{$formattedIn} (" . $sl->duration_formatted . ")";
+        }
+        $slNote = !empty($slTexts) ? implode('; ', $slTexts) : '';
+        $displayNote = trim(($att->note ? $att->note . '. ' : '') . $slNote);
       @endphp
       <tr style="background:{{ $rowBg }}">
         <td style="border:1px solid #ddd;padding:4px 7px;text-align:center">{{ $att->date->format('d-M-y') }}</td>
@@ -200,7 +210,7 @@
         <td style="border:1px solid #ddd;padding:4px 7px;text-align:center;font-weight:700;color:{{ $sc }}">
           {{ ucfirst(str_replace('_',' ',$att->status)) }}
         </td>
-        <td style="border:1px solid #ddd;padding:4px 7px;font-size:10px;color:#64748b">{{ $att->note }}</td>
+        <td style="border:1px solid #ddd;padding:4px 7px;font-size:10px;color:#64748b">{{ $displayNote ?: '—' }}</td>
       </tr>
       @endforeach
     </tbody>
